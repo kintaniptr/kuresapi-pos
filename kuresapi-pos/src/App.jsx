@@ -471,11 +471,12 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
-  const deactivate = async (id) => {
-    if (!confirm("Nonaktifkan item ini?")) return;
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const deleteItem = async (item) => {
     try {
-      await api(`kr_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ is_active: false }), prefer: "return=minimal" });
-      showToast("Item dinonaktifkan"); onRefresh();
+      await api(`kr_items?id=eq.${item.id}`, { method: "DELETE", prefer: "return=minimal" });
+      showToast("🗑️ Item dihapus permanen!"); setConfirmDelete(null); onRefresh();
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
@@ -515,6 +516,9 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
 
   return (
     <div>
+      {/* Confirm Delete Modal */}
+      {confirmDelete && <ConfirmModal title="Hapus Item?" message={`Hapus "${confirmDelete.name}" secara permanen dari database?`} onConfirm={() => deleteItem(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10 }}>
         <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, flex: 1 }}>
           {[["all","Semua"],["product","Produk"],["workshop","Workshop"],["equipment","Perlengkapan"]].map(([v,l]) => (
@@ -546,7 +550,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button onClick={() => openEdit(item)} className="tap-btn" style={{ padding: "6px 12px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
-                    <button onClick={() => deactivate(item.id)} className="tap-btn" style={{ padding: "6px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                    <button onClick={() => setConfirmDelete(item)} className="tap-btn" style={{ padding: "6px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 12, fontSize: 13 }}>
@@ -584,7 +588,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                     <td style={{ padding: "12px 14px" }}>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button onClick={() => openEdit(item)} className="tap-btn" style={{ padding: "5px 12px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
-                        <button onClick={() => deactivate(item.id)} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                        <button onClick={() => setConfirmDelete(item)} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️ Hapus</button>
                       </div>
                     </td>
                   </tr>
@@ -603,6 +607,14 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
   const [form, setForm] = useState({ item_id: "", direction: "in", qty: "", note: "" });
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const deleteMove = async (move) => {
+    try {
+      await api(`kr_stock_moves?id=eq.${move.id}`, { method: "DELETE", prefer: "return=minimal" });
+      showToast("🗑️ Mutasi dihapus!"); setConfirmDelete(null); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
 
   const save = async () => {
     if (!form.item_id || !form.qty) return showToast("Pilih item dan isi qty", "error");
@@ -652,6 +664,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
 
   return (
     <div>
+      {confirmDelete && <ConfirmModal title="Hapus Mutasi?" message={`Hapus catatan mutasi ini dari database? Stok tidak akan otomatis dikembalikan.`} onConfirm={() => deleteMove(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
       {isMobile ? (
         <>
           <button onClick={() => setShowForm(true)} className="tap-btn" style={{ width: "100%", padding: "13px 0", background: "linear-gradient(135deg,#e91e8c,#7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 15, marginBottom: 16 }}>+ Catat Mutasi Stok</button>
@@ -670,21 +683,21 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
           </div>
           <div>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14, color: "#2d1a35" }}>📋 Riwayat</div>
-            <MovesList moves={moves} itemMap={itemMap} />
+            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} />
           </div>
         </div>
       )}
       {isMobile && (
         <>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#2d1a35" }}>📋 Riwayat Mutasi</div>
-          <MovesList moves={moves} itemMap={itemMap} isMobile={isMobile} />
+          <MovesList moves={moves} itemMap={itemMap} isMobile={isMobile} onDelete={setConfirmDelete} />
         </>
       )}
     </div>
   );
 }
 
-function MovesList({ moves, itemMap, isMobile }) {
+function MovesList({ moves, itemMap, isMobile, onDelete }) {
   if (moves.length === 0) return (
     <div style={{ ...CARD, padding: 40, textAlign: "center", color: "#9a7aaa" }}>
       <div style={{ fontSize: 36 }}>📋</div>Belum ada mutasi stok
@@ -702,6 +715,7 @@ function MovesList({ moves, itemMap, isMobile }) {
           <div style={{ fontSize: 16, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444", flexShrink: 0 }}>
             {m.direction === "in" ? "+" : "−"}{m.qty}
           </div>
+          <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "6px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>🗑️</button>
         </div>
       ))}
     </div>
@@ -711,7 +725,7 @@ function MovesList({ moves, itemMap, isMobile }) {
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "linear-gradient(135deg,#fce4f3,#dbeafe)" }}>
-            {["Waktu","Item","Arah","Qty","Keterangan"].map(h => (
+            {["Waktu","Item","Arah","Qty","Keterangan",""].map(h => (
               <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#2d1a35", fontWeight: 700, borderBottom: "2px solid #f0d6eb" }}>{h}</th>
             ))}
           </tr>
@@ -726,6 +740,9 @@ function MovesList({ moves, itemMap, isMobile }) {
               </td>
               <td style={{ padding: "10px 14px", fontSize: 15, fontWeight: 800 }}>{m.qty}</td>
               <td style={{ padding: "10px 14px", fontSize: 13, color: "#9a7aaa" }}>{m.note || "—"}</td>
+              <td style={{ padding: "10px 14px" }}>
+                <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️ Hapus</button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -739,6 +756,15 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
   const [detail, setDetail] = useState(null);
   const [orderItems, setOrderItems] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const deleteOrder = async (order) => {
+    try {
+      await api(`kr_order_items?order_id=eq.${order.id}`, { method: "DELETE", prefer: "return=minimal" });
+      await api(`kr_orders?id=eq.${order.id}`, { method: "DELETE", prefer: "return=minimal" });
+      showToast("🗑️ Transaksi dihapus!"); setConfirmDelete(null); setDetail(null); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
 
   const totalRevenue = orders.filter(o => o.status === "paid").reduce((s, o) => s + (o.total || 0), 0);
   const todayOrders = orders.filter(o => new Date(o.created_at).toDateString() === new Date().toDateString());
@@ -759,6 +785,8 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
 
   return (
     <div>
+      {confirmDelete && <ConfirmModal title="Hapus Transaksi?" message={`Hapus transaksi ${confirmDelete.order_no} (${formatRp(confirmDelete.total)}) secara permanen?`} onConfirm={() => deleteOrder(confirmDelete)} onCancel={() => setConfirmDelete(null)} danger />}
+
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
         {statCards.map(s => (
           <div key={s.label} style={{ ...CARD, padding: isMobile ? "12px 14px" : "18px 20px", borderTop: `4px solid ${s.accent}` }}>
@@ -779,9 +807,12 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
                 <div key={o.id} onClick={() => openDetail(o)} className="tap-btn" style={{ ...CARD, padding: 14, cursor: "pointer" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#e91e8c" }}>{o.order_no}</div>
-                    <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 20, fontWeight: 700, background: o.status === "paid" ? "#d1fae5" : "#fef3c7", color: o.status === "paid" ? "#10b981" : "#f59e0b" }}>
-                      {o.status === "paid" ? "✅ Lunas" : "⏳ Pending"}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 20, fontWeight: 700, background: o.status === "paid" ? "#d1fae5" : "#fef3c7", color: o.status === "paid" ? "#10b981" : "#f59e0b" }}>
+                        {o.status === "paid" ? "✅ Lunas" : "⏳ Pending"}
+                      </span>
+                      <button onClick={e => { e.stopPropagation(); setConfirmDelete(o); }} className="tap-btn" style={{ padding: "4px 7px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                    </div>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
@@ -801,7 +832,7 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
               <div onClick={() => setDetail(null)} style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} />
               <div style={{ background: "#fdf4fb", borderRadius: "20px 20px 0 0", padding: 20, maxHeight: "80vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
                 <div style={{ width: 36, height: 4, background: "#f0d6eb", borderRadius: 2, margin: "0 auto 16px" }} />
-                <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} />
+                <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} />
               </div>
             </div>
           )}
@@ -834,7 +865,9 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
                           {o.status === "paid" ? "✅ Lunas" : "⏳ Pending"}
                         </span>
                       </td>
-                      <td style={{ padding: "10px 14px", fontSize: 12, color: "#9a7aaa" }}>→</td>
+                      <td style={{ padding: "10px 14px" }}>
+                        <button onClick={e => { e.stopPropagation(); setConfirmDelete(o); }} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️ Hapus</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -843,7 +876,7 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
           </div>
           {detail && (
             <div style={{ ...CARD, padding: 20, height: "fit-content", position: "sticky", top: 110 }}>
-              <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} />
+              <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} />
             </div>
           )}
         </div>
@@ -852,12 +885,15 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
   );
 }
 
-function OrderDetail({ detail, orderItems, loadingDetail, onClose }) {
+function OrderDetail({ detail, orderItems, loadingDetail, onClose, onDelete }) {
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontWeight: 800, fontSize: 15, color: "#e91e8c" }}>{detail.order_no}</div>
-        <button onClick={onClose} className="tap-btn" style={{ background: "#fce4f3", border: "none", cursor: "pointer", fontSize: 16, color: "#e91e8c", borderRadius: 8, width: 30, height: 30 }}>×</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={onDelete} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>🗑️ Hapus</button>
+          <button onClick={onClose} className="tap-btn" style={{ background: "#fce4f3", border: "none", cursor: "pointer", fontSize: 16, color: "#e91e8c", borderRadius: 8, width: 30, height: 30 }}>×</button>
+        </div>
       </div>
       <div style={{ background: "#dbeafe", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 12, lineHeight: 1.8 }}>
         <div>👤 <b>{detail.customer_name || "Umum"}</b></div>
@@ -891,6 +927,27 @@ function OrderDetail({ detail, orderItems, loadingDetail, onClose }) {
         </>
       )}
     </>
+  );
+}
+
+// ─── CONFIRM MODAL ────────────────────────────────────────────────────────────
+function ConfirmModal({ title, message, onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={onCancel} style={{ position: "absolute", inset: 0, background: "rgba(45,26,53,0.5)" }} />
+      <div style={{ ...CARD, padding: 28, maxWidth: 380, width: "100%", position: "relative", zIndex: 1, animation: "slideIn 0.2s ease" }}>
+        <div style={{ fontSize: 36, textAlign: "center", marginBottom: 12 }}>⚠️</div>
+        <div style={{ fontWeight: 800, fontSize: 17, color: "#2d1a35", textAlign: "center", marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 14, color: "#9a7aaa", textAlign: "center", marginBottom: 24, lineHeight: 1.6 }}>{message}</div>
+        <div style={{ background: "#fff8e6", border: "1.5px solid #fcd97a", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#a86a00", marginBottom: 20, textAlign: "center" }}>
+          ⚠️ Tindakan ini <b>tidak bisa dibatalkan</b>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} className="tap-btn" style={{ flex: 1, padding: "13px 0", background: "#fff", color: "#2d1a35", border: "1.5px solid #f0d6eb", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 14 }}>Batal</button>
+          <button onClick={onConfirm} className="tap-btn" style={{ flex: 1, padding: "13px 0", background: "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 14 }}>🗑️ Hapus Permanen</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
