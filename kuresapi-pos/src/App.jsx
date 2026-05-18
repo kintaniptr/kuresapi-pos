@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const SUPABASE_URL = "https://iqhvdvvuonqxlnbnefgb.supabase.co";
 const SUPABASE_KEY = "sb_publishable_nstXpLON-OZBhLpNAE5bdg_lMVSgGw9";
 
-// ─── KREDENSIAL LOGIN ─────────────────────────────────────────────────────────
+// ─── KREDENSIAL LOGIN ─── v2
 // Ganti username dan password di sini sesuai keinginan
 const USERS = [
   { username: "admin",   password: "kuresapi123", role: "Admin" },
