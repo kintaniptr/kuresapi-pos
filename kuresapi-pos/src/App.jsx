@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const SUPABASE_URL = "https://iqhvdvvuonqxlnbnefgb.supabase.co";
 const SUPABASE_KEY = "sb_publishable_nstXpLON-OZBhLpNAE5bdg_lMVSgGw9";
 
-// ─── KREDENSIAL LOGIN ─── v2
+// ─── KREDENSIAL LOGIN ─────────────────────────────────────────────────────────
 // Ganti username dan password di sini sesuai keinginan
 const USERS = [
   { username: "admin",   password: "kuresapi123", role: "Admin" },
@@ -115,11 +115,6 @@ export default function App() {
   });
   const isMobile = useIsMobile();
 
-  const showToast = (msg, type = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const handleLogin = (u) => {
     setUser(u);
     try { sessionStorage.setItem("kr_user", JSON.stringify(u)); } catch {}
@@ -129,9 +124,6 @@ export default function App() {
     setUser(null);
     try { sessionStorage.removeItem("kr_user"); } catch {}
   };
-
-  // Tampilkan login screen kalau belum login
-  if (!user) return <LoginScreen onLogin={handleLogin} isMobile={isMobile} />;
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -150,6 +142,9 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadItems(); loadOrders(); loadMoves(); }, []);
+
+  // Tampilkan login screen kalau belum login
+  if (!user) return <LoginScreen onLogin={handleLogin} isMobile={isMobile} />;
 
   return (
     <div style={{ fontFamily: "'Segoe UI', Tahoma, sans-serif", minHeight: "100vh", background: "#fadeeb", paddingBottom: isMobile ? 70 : 0 }}>
