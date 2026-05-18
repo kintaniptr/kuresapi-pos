@@ -3,6 +3,42 @@ import { useState, useEffect, useCallback } from "react";
 const SUPABASE_URL = "https://iqhvdvvuonqxlnbnefgb.supabase.co";
 const SUPABASE_KEY = "sb_publishable_nstXpLON-OZBhLpNAE5bdg_lMVSgGw9";
 
+// ─── THEME ────────────────────────────────────────────────────────────────────
+const T = {
+  pink:       "#e91e8c",
+  pinkLight:  "#fce4f3",
+  pinkMid:    "#f48cc8",
+  blue:       "#2563eb",
+  blueLight:  "#dbeafe",
+  blueMid:    "#93c5fd",
+  purple:     "#7c3aed",
+  purpleLight:"#ede9fe",
+  bg:         "#fdf4fb",
+  card:       "#ffffff",
+  border:     "#f0d6eb",
+  text:       "#2d1a35",
+  textMuted:  "#9a7aaa",
+  success:    "#10b981",
+  successBg:  "#d1fae5",
+  error:      "#ef4444",
+  errorBg:    "#fee2e2",
+  warning:    "#f59e0b",
+  warningBg:  "#fef3c7",
+};
+
+const ITEM_COLORS = {
+  product:   { bg: "#dbeafe", text: "#2563eb", border: "#93c5fd", label: "📦 Produk" },
+  workshop:  { bg: "#fce4f3", text: "#e91e8c", border: "#f48cc8", label: "🎓 Workshop" },
+  equipment: { bg: "#ede9fe", text: "#7c3aed", border: "#c4b5fd", label: "🔧 Perlengkapan" },
+};
+
+const CARD = { background: "#ffffff", borderRadius: 16, border: "1.5px solid #f0d6eb", boxShadow: "0 2px 12px rgba(233,30,140,0.06)" };
+
+const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
+const formatDate = (d) => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const genOrderNo = () => `KRS-${Date.now().toString().slice(-8)}`;
+
+// ─── API ──────────────────────────────────────────────────────────────────────
 const api = async (path, opts = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...opts,
@@ -22,7 +58,6 @@ const api = async (path, opts = {}) => {
   return text ? JSON.parse(text) : [];
 };
 
-// DB Setup SQL (run once)
 const SETUP_SQL = `
 -- Items table (products, workshop events, equipment)
 create table if not exists kr_items (
@@ -79,31 +114,20 @@ create table if not exists kr_order_items (
 );
 `;
 
-const COLORS = {
-  product: { bg: "#e8f4fd", text: "#1a6fa8", label: "Produk" },
-  workshop: { bg: "#fdf0e8", text: "#a85a1a", label: "Workshop" },
-  equipment: { bg: "#e8fdf0", text: "#1a8a4a", label: "Perlengkapan" },
-};
-
-const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
-const formatDate = (d) => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-const genOrderNo = () => `KRS-${Date.now().toString().slice(-8)}`;
-
-// ─── TABS ─────────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: "pos", icon: "🛒", label: "POS / Kasir" },
+  { id: "pos",       icon: "🛒", label: "Kasir" },
   { id: "inventory", icon: "📦", label: "Inventory" },
-  { id: "stock", icon: "↕️", label: "Stok Masuk/Keluar" },
-  { id: "sales", icon: "📊", label: "Penjualan" },
-  { id: "setup", icon: "⚙️", label: "Setup DB" },
+  { id: "stock",     icon: "↕️", label: "Stok" },
+  { id: "sales",     icon: "📊", label: "Penjualan" },
+  { id: "setup",     icon: "⚙️", label: "Setup" },
 ];
 
+// ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("pos");
   const [items, setItems] = useState([]);
   const [orders, setOrders] = useState([]);
   const [moves, setMoves] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = "success") => {
@@ -112,77 +136,64 @@ export default function App() {
   };
 
   const loadItems = useCallback(async () => {
-    try {
-      const data = await api("kr_items?is_active=eq.true&order=name.asc");
-      setItems(data);
-    } catch (e) {
-      if (!e.message.includes("does not exist")) showToast("Error: " + e.message, "error");
-    }
+    try { setItems(await api("kr_items?is_active=eq.true&order=name.asc")); }
+    catch (e) { if (!e.message.includes("does not exist")) showToast("Error: " + e.message, "error"); }
   }, []);
 
   const loadOrders = useCallback(async () => {
-    try {
-      const data = await api("kr_orders?order=created_at.desc&limit=100");
-      setOrders(data);
-    } catch {}
+    try { setOrders(await api("kr_orders?order=created_at.desc&limit=100")); } catch {}
   }, []);
 
   const loadMoves = useCallback(async () => {
-    try {
-      const data = await api("kr_stock_moves?order=created_at.desc&limit=200");
-      setMoves(data);
-    } catch {}
+    try { setMoves(await api("kr_stock_moves?order=created_at.desc&limit=200")); } catch {}
   }, []);
 
-  useEffect(() => {
-    loadItems();
-    loadOrders();
-    loadMoves();
-  }, []);
+  useEffect(() => { loadItems(); loadOrders(); loadMoves(); }, []);
 
   return (
-    <div style={{ fontFamily: "'Segoe UI', sans-serif", minHeight: "100vh", background: "#f7f6f3" }}>
-      {/* Header */}
-      <div style={{ background: "#1a1a2e", color: "#fff", padding: "0 24px", display: "flex", alignItems: "center", gap: 16, height: 56 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "#e8a020", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14 }}>K</div>
-          <span style={{ fontWeight: 700, fontSize: 17, letterSpacing: 1 }}>KURESAPI</span>
-          <span style={{ fontSize: 12, color: "#888", marginLeft: 4 }}>POS & Inventory</span>
+    <div style={{ fontFamily: "'Segoe UI', Tahoma, sans-serif", minHeight: "100vh", background: "#fdf4fb" }}>
+      <style>{`
+        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        input:focus, select:focus, textarea:focus { outline: 2px solid #e91e8c !important; border-color: #e91e8c !important; }
+        tbody tr:hover td { background: #fce4f3 !important; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{ background: "linear-gradient(135deg, #1a0830 0%, #2d1060 50%, #1a1a6e 100%)", color: "#fff", padding: "0 28px", display: "flex", alignItems: "center", gap: 16, height: 62, boxShadow: "0 4px 20px rgba(124,58,237,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: "linear-gradient(135deg, #e91e8c, #2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 20, boxShadow: "0 2px 10px rgba(233,30,140,0.5)" }}>✿</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: 1.5, color: "#f9a8d4" }}>KURESAPI</div>
+            <div style={{ fontSize: 10, color: "#a78bfa", letterSpacing: 1, marginTop: -2 }}>POS & INVENTORY</div>
+          </div>
         </div>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, color: "#666" }}>{new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</span>
+        <div style={{ fontSize: 12, color: "#c4b5fd", background: "rgba(255,255,255,0.08)", padding: "5px 12px", borderRadius: 20 }}>
+          📅 {new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+        </div>
       </div>
 
-      {/* Nav */}
-      <div style={{ background: "#fff", borderBottom: "1px solid #e5e5e5", padding: "0 24px", display: "flex", gap: 4 }}>
+      {/* ── Nav ── */}
+      <div style={{ background: "#fff", borderBottom: "2px solid #f0d6eb", padding: "0 28px", display: "flex", gap: 2 }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding: "12px 16px", border: "none", background: "none", cursor: "pointer",
-            borderBottom: tab === t.id ? "2px solid #e8a020" : "2px solid transparent",
-            color: tab === t.id ? "#e8a020" : "#555", fontWeight: tab === t.id ? 600 : 400,
-            fontSize: 13, display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <span>{t.icon}</span> {t.label}
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "13px 18px", border: "none", background: "none", cursor: "pointer", borderBottom: tab === t.id ? "3px solid #e91e8c" : "3px solid transparent", color: tab === t.id ? "#e91e8c" : "#9a7aaa", fontWeight: tab === t.id ? 700 : 500, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 16 }}>{t.icon}</span> {t.label}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      <div style={{ padding: "24px", maxWidth: 1280, margin: "0 auto" }}>
-        {tab === "pos" && <POS items={items} onRefresh={() => { loadItems(); loadOrders(); }} showToast={showToast} />}
+      {/* ── Content ── */}
+      <div style={{ padding: "28px", maxWidth: 1320, margin: "0 auto" }}>
+        {tab === "pos"       && <POS items={items} onRefresh={() => { loadItems(); loadOrders(); }} showToast={showToast} />}
         {tab === "inventory" && <Inventory items={items} onRefresh={loadItems} showToast={showToast} />}
-        {tab === "stock" && <StockMoves items={items} moves={moves} onRefresh={() => { loadItems(); loadMoves(); }} showToast={showToast} />}
-        {tab === "sales" && <Sales orders={orders} items={items} onRefresh={loadOrders} showToast={showToast} />}
-        {tab === "setup" && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); }} />}
+        {tab === "stock"     && <StockMoves items={items} moves={moves} onRefresh={() => { loadItems(); loadMoves(); }} showToast={showToast} />}
+        {tab === "sales"     && <Sales orders={orders} items={items} onRefresh={loadOrders} showToast={showToast} />}
+        {tab === "setup"     && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); }} />}
       </div>
 
-      {/* Toast */}
+      {/* ── Toast ── */}
       {toast && (
-        <div style={{
-          position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10,
-          background: toast.type === "error" ? "#c0392b" : "#27ae60",
-          color: "#fff", fontSize: 14, fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.2)", zIndex: 9999,
-        }}>{toast.msg}</div>
+        <div style={{ position: "fixed", bottom: 28, right: 28, padding: "13px 22px", borderRadius: 14, background: toast.type === "error" ? "linear-gradient(135deg,#ef4444,#dc2626)" : "linear-gradient(135deg,#e91e8c,#7c3aed)", color: "#fff", fontSize: 14, fontWeight: 600, boxShadow: "0 6px 24px rgba(0,0,0,0.2)", zIndex: 9999, animation: "slideIn 0.3s ease" }}>{toast.msg}</div>
       )}
     </div>
   );
@@ -228,155 +239,127 @@ function POS({ items, onRefresh, showToast }) {
       const orderNo = genOrderNo();
       const [order] = await api("kr_orders", {
         method: "POST",
-        body: JSON.stringify({
-          order_no: orderNo, customer_name: customer || "Umum", customer_phone: customerPhone,
-          payment_method: payment, subtotal, discount, total, status: "paid",
-        }),
+        body: JSON.stringify({ order_no: orderNo, customer_name: customer || "Umum", customer_phone: customerPhone, payment_method: payment, subtotal, discount, total, status: "paid" }),
       });
-
-      await api("kr_order_items", {
-        method: "POST",
-        body: JSON.stringify(cart.map(x => ({
-          order_id: order.id, item_id: x.id, item_name: x.name,
-          qty: x.qty, price: x.price, subtotal: x.price * x.qty,
-        }))),
-        prefer: "return=minimal",
-      });
-
-      // Deduct stock for products & equipment
-      const moves = cart.filter(x => x.type !== "workshop").map(x => ({
-        item_id: x.id, direction: "out", qty: x.qty,
-        note: `Penjualan ${orderNo}`, ref_id: order.id,
-      }));
-      if (moves.length) {
-        await api("kr_stock_moves", { method: "POST", body: JSON.stringify(moves), prefer: "return=minimal" });
-        for (const m of moves) {
-          const item = items.find(i => i.id === m.item_id);
-          if (item) {
-            await api(`kr_items?id=eq.${m.item_id}`, {
-              method: "PATCH", body: JSON.stringify({ stock: (item.stock || 0) - m.qty }), prefer: "return=minimal",
-            });
-          }
+      await api("kr_order_items", { method: "POST", body: JSON.stringify(cart.map(x => ({ order_id: order.id, item_id: x.id, item_name: x.name, qty: x.qty, price: x.price, subtotal: x.price * x.qty }))), prefer: "return=minimal" });
+      const stockItems = cart.filter(x => x.type !== "workshop");
+      if (stockItems.length) {
+        await api("kr_stock_moves", { method: "POST", body: JSON.stringify(stockItems.map(x => ({ item_id: x.id, direction: "out", qty: x.qty, note: `Penjualan ${orderNo}`, ref_id: order.id }))), prefer: "return=minimal" });
+        for (const m of stockItems) {
+          const item = items.find(i => i.id === m.id);
+          if (item) await api(`kr_items?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ stock: (item.stock || 0) - m.qty }), prefer: "return=minimal" });
         }
       }
-
       setInvoice({ ...order, items: cart, customer, customerPhone, payment, subtotal, discount, total });
       setCart([]); setCustomer(""); setCustomerPhone(""); setDiscount(0);
       onRefresh();
-      showToast(`✓ Transaksi ${orderNo} berhasil!`);
-    } catch (e) {
-      showToast("Gagal: " + e.message, "error");
-    }
+      showToast(`✨ Transaksi ${orderNo} berhasil!`);
+    } catch (e) { showToast("Gagal: " + e.message, "error"); }
     setSaving(false);
   };
 
   if (invoice) return <InvoiceView invoice={invoice} onClose={() => setInvoice(null)} />;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
-      {/* Products */}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", gap: 24 }}>
       <div>
-        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-          <input placeholder="🔍 Cari produk / SKU..." value={search} onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1, padding: "10px 14px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14 }} />
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            style={{ padding: "10px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14 }}>
-            <option value="all">Semua</option>
-            <option value="product">Produk</option>
-            <option value="workshop">Workshop</option>
-            <option value="equipment">Perlengkapan</option>
+        <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
+          <div style={{ flex: 1, position: "relative" }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>🔍</span>
+            <input placeholder="Cari produk atau SKU..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "11px 14px 11px 36px", border: "1.5px solid #f0d6eb", borderRadius: 12, fontSize: 14, background: "#fff", boxSizing: "border-box" }} />
+          </div>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: "11px 14px", border: "1.5px solid #f0d6eb", borderRadius: 12, fontSize: 14, background: "#fff", color: "#2d1a35" }}>
+            <option value="all">✨ Semua</option>
+            <option value="product">📦 Produk</option>
+            <option value="workshop">🎓 Workshop</option>
+            <option value="equipment">🔧 Perlengkapan</option>
           </select>
         </div>
+
         {filtered.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "60px 0", color: "#999" }}>
-            <div style={{ fontSize: 40, marginBottom: 8 }}>📦</div>
-            <div>Belum ada item. Tambah di tab Inventory.</div>
+          <div style={{ textAlign: "center", padding: "80px 0", color: "#9a7aaa" }}>
+            <div style={{ fontSize: 52, marginBottom: 10 }}>🌸</div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>Belum ada item</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>Tambah di tab Inventory ya!</div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-            {filtered.map(item => (
-              <button key={item.id} onClick={() => addToCart(item)} style={{
-                background: "#fff", border: "1px solid #e5e5e5", borderRadius: 10, padding: 14,
-                cursor: item.type !== "workshop" && item.stock <= 0 ? "not-allowed" : "pointer",
-                textAlign: "left", transition: "all 0.15s", opacity: item.type !== "workshop" && item.stock <= 0 ? 0.5 : 1,
-              }} disabled={item.type !== "workshop" && item.stock <= 0}>
-                <div style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, display: "inline-block", marginBottom: 6, background: COLORS[item.type].bg, color: COLORS[item.type].text, fontWeight: 600 }}>
-                  {COLORS[item.type].label}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.3 }}>{item.name}</div>
-                <div style={{ fontSize: 13, color: "#e8a020", fontWeight: 700 }}>{formatRp(item.price)}</div>
-                {item.type !== "workshop" && (
-                  <div style={{ fontSize: 11, color: item.stock <= 5 ? "#c0392b" : "#888", marginTop: 4 }}>
-                    Stok: {item.stock} {item.unit}
-                  </div>
-                )}
-              </button>
-            ))}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))", gap: 14 }}>
+            {filtered.map(item => {
+              const c = ITEM_COLORS[item.type];
+              const outOfStock = item.type !== "workshop" && item.stock <= 0;
+              return (
+                <button key={item.id} onClick={() => !outOfStock && addToCart(item)} disabled={outOfStock} style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 16, padding: 16, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, boxShadow: outOfStock ? "none" : `0 2px 10px ${c.bg}` }}>
+                  <div style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, display: "inline-block", marginBottom: 8, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, lineHeight: 1.35, color: "#2d1a35" }}>{item.name}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#e91e8c" }}>{formatRp(item.price)}</div>
+                  {item.type !== "workshop" && (
+                    <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#9a7aaa", marginTop: 5, fontWeight: 600 }}>
+                      {outOfStock ? "❌ Habis" : `📦 Stok: ${item.stock}`}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* Cart */}
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 20, height: "fit-content", position: "sticky", top: 20 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>🛒 Keranjang</div>
-        <input placeholder="Nama customer (opsional)" value={customer} onChange={e => setCustomer(e.target.value)}
-          style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
-        <input placeholder="No. HP (opsional)" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)}
-          style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 13, marginBottom: 12, boxSizing: "border-box" }} />
+      <div style={{ ...CARD, padding: 22, height: "fit-content", position: "sticky", top: 20 }}>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 16, color: "#2d1a35", display: "flex", alignItems: "center", gap: 8 }}>
+          🛒 Keranjang
+          {cart.length > 0 && <span style={{ background: "#e91e8c", color: "#fff", borderRadius: 20, fontSize: 12, padding: "2px 8px", fontWeight: 700 }}>{cart.length}</span>}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          <input placeholder="👤 Nama customer (opsional)" value={customer} onChange={e => setCustomer(e.target.value)} style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 13, boxSizing: "border-box" }} />
+          <input placeholder="📱 No. HP (opsional)" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 13, boxSizing: "border-box" }} />
+        </div>
 
         {cart.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#bbb", fontSize: 13 }}>Pilih produk dari kiri</div>
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9a7aaa", fontSize: 13 }}>
+            <div style={{ fontSize: 36, marginBottom: 6 }}>🛍️</div>Pilih produk dari kiri
+          </div>
         ) : (
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 14, maxHeight: 280, overflowY: "auto" }}>
             {cart.map(item => (
-              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid #f0d6eb" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{item.name}</div>
-                  <div style={{ fontSize: 12, color: "#888" }}>{formatRp(item.price)} × {item.qty}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#2d1a35" }}>{item.name}</div>
+                  <div style={{ fontSize: 12, color: "#9a7aaa" }}>{formatRp(item.price)} × {item.qty}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <button onClick={() => updateQty(item.id, item.qty - 1)} style={{ width: 24, height: 24, border: "1px solid #ddd", borderRadius: 4, background: "#f5f5f5", cursor: "pointer", fontSize: 14 }}>−</button>
-                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
-                  <button onClick={() => updateQty(item.id, item.qty + 1)} style={{ width: 24, height: 24, border: "1px solid #ddd", borderRadius: 4, background: "#f5f5f5", cursor: "pointer", fontSize: 14 }}>+</button>
+                  <button onClick={() => updateQty(item.id, item.qty - 1)} style={{ width: 26, height: 26, border: "1.5px solid #f0d6eb", borderRadius: 8, background: "#fce4f3", cursor: "pointer", fontSize: 14, color: "#e91e8c", fontWeight: 700 }}>−</button>
+                  <span style={{ fontSize: 13, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
+                  <button onClick={() => updateQty(item.id, item.qty + 1)} style={{ width: 26, height: 26, border: "1.5px solid #f0d6eb", borderRadius: 8, background: "#dbeafe", cursor: "pointer", fontSize: 14, color: "#2563eb", fontWeight: 700 }}>+</button>
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, minWidth: 72, textAlign: "right" }}>{formatRp(item.price * item.qty)}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, minWidth: 75, textAlign: "right", color: "#e91e8c" }}>{formatRp(item.price * item.qty)}</div>
               </div>
             ))}
           </div>
         )}
 
-        <div style={{ borderTop: "1px solid #eee", paddingTop: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666", marginBottom: 6 }}>
-            <span>Subtotal</span><span>{formatRp(subtotal)}</span>
+        <div style={{ borderTop: "2px dashed #f0d6eb", paddingTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#9a7aaa", marginBottom: 8 }}>
+            <span>Subtotal</span><span style={{ fontWeight: 600, color: "#2d1a35" }}>{formatRp(subtotal)}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <span style={{ fontSize: 13, color: "#666", flex: 1 }}>Diskon (Rp)</span>
-            <input type="number" value={discount} onChange={e => setDiscount(Number(e.target.value))} min={0}
-              style={{ width: 110, padding: "4px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13, textAlign: "right" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: "#9a7aaa", flex: 1 }}>🏷️ Diskon (Rp)</span>
+            <input type="number" value={discount} onChange={e => setDiscount(Number(e.target.value))} min={0} style={{ width: 110, padding: "6px 10px", border: "1.5px solid #f0d6eb", borderRadius: 8, fontSize: 13, textAlign: "right" }} />
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 17, color: "#1a1a2e", marginBottom: 12 }}>
-            <span>Total</span><span style={{ color: "#e8a020" }}>{formatRp(total)}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 19, marginBottom: 14 }}>
+            <span style={{ color: "#2d1a35" }}>TOTAL</span>
+            <span style={{ color: "#e91e8c" }}>{formatRp(total)}</span>
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            {["cash", "qris"].map(m => (
-              <button key={m} onClick={() => setPayment(m)} style={{
-                flex: 1, padding: "8px 0", border: `2px solid ${payment === m ? "#e8a020" : "#ddd"}`,
-                borderRadius: 8, background: payment === m ? "#fff8e6" : "#fff",
-                color: payment === m ? "#e8a020" : "#666", fontWeight: payment === m ? 700 : 400,
-                cursor: "pointer", fontSize: 13,
-              }}>
-                {m === "cash" ? "💵 Tunai" : "📲 QRIS"}
-              </button>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[["cash", "💵 Tunai"], ["qris", "📲 QRIS"]].map(([m, l]) => (
+              <button key={m} onClick={() => setPayment(m)} style={{ flex: 1, padding: "10px 0", border: `2px solid ${payment === m ? "#e91e8c" : "#f0d6eb"}`, borderRadius: 10, background: payment === m ? "#fce4f3" : "#fff", color: payment === m ? "#e91e8c" : "#9a7aaa", fontWeight: payment === m ? 700 : 500, cursor: "pointer", fontSize: 13 }}>{l}</button>
             ))}
           </div>
 
-          <button onClick={checkout} disabled={saving || !cart.length} style={{
-            width: "100%", padding: "13px 0", background: saving || !cart.length ? "#ccc" : "#1a1a2e",
-            color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 15,
-            cursor: saving || !cart.length ? "not-allowed" : "pointer",
-          }}>
-            {saving ? "Memproses..." : "✓ Proses Pembayaran"}
+          <button onClick={checkout} disabled={saving || !cart.length} style={{ width: "100%", padding: "14px 0", fontSize: 15, background: saving || !cart.length ? "#ddd" : "linear-gradient(135deg, #e91e8c, #7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: saving || !cart.length ? "not-allowed" : "pointer" }}>
+            {saving ? "⏳ Memproses..." : "✨ Proses Pembayaran"}
           </button>
         </div>
       </div>
@@ -384,47 +367,49 @@ function POS({ items, onRefresh, showToast }) {
   );
 }
 
-// ─── INVOICE VIEW ─────────────────────────────────────────────────────────────
+// ─── INVOICE ──────────────────────────────────────────────────────────────────
 function InvoiceView({ invoice, onClose }) {
-  const print = () => window.print();
   return (
     <div style={{ maxWidth: 480, margin: "0 auto" }}>
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 32 }} id="invoice-print">
+      <div style={{ ...CARD, padding: 32 }}>
         <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: 2 }}>KURESAPI</div>
-          <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>Bukti Pembayaran</div>
-          <div style={{ fontSize: 12, color: "#888" }}>{invoice.order_no || invoice.orderNo}</div>
-          <div style={{ fontSize: 12, color: "#888" }}>{new Date().toLocaleString("id-ID")}</div>
+          <div style={{ width: 56, height: 56, borderRadius: 14, background: "linear-gradient(135deg, #e91e8c, #7c3aed)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 10px" }}>✿</div>
+          <div style={{ fontWeight: 900, fontSize: 22, letterSpacing: 2, color: "#2d1a35" }}>KURESAPI</div>
+          <div style={{ fontSize: 12, color: "#9a7aaa" }}>Bukti Pembayaran</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#e91e8c", marginTop: 4 }}>{invoice.order_no}</div>
+          <div style={{ fontSize: 12, color: "#9a7aaa" }}>{new Date().toLocaleString("id-ID")}</div>
         </div>
-        <div style={{ borderTop: "1px dashed #ddd", borderBottom: "1px dashed #ddd", padding: "12px 0", marginBottom: 12 }}>
-          <div style={{ fontSize: 13, marginBottom: 4 }}>Customer: <b>{invoice.customer_name || invoice.customer || "Umum"}</b></div>
-          {(invoice.customer_phone || invoice.customerPhone) && <div style={{ fontSize: 13 }}>HP: {invoice.customer_phone || invoice.customerPhone}</div>}
-          <div style={{ fontSize: 13 }}>Pembayaran: <b>{(invoice.payment_method || invoice.payment) === "cash" ? "Tunai" : "QRIS"}</b></div>
+        <div style={{ background: "#fce4f3", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
+          <div style={{ fontSize: 13, marginBottom: 2 }}>👤 Customer: <b>{invoice.customer_name || invoice.customer || "Umum"}</b></div>
+          {(invoice.customer_phone || invoice.customerPhone) && <div style={{ fontSize: 13 }}>📱 {invoice.customer_phone || invoice.customerPhone}</div>}
+          <div style={{ fontSize: 13 }}>💳 {(invoice.payment_method || invoice.payment) === "cash" ? "💵 Tunai" : "📲 QRIS"}</div>
         </div>
-        {invoice.items?.map((item, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
-            <span>{item.name} × {item.qty}</span>
-            <span>{formatRp(item.price * item.qty)}</span>
-          </div>
-        ))}
-        <div style={{ borderTop: "1px dashed #ddd", marginTop: 12, paddingTop: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666", marginBottom: 4 }}>
+        <div style={{ marginBottom: 14 }}>
+          {invoice.items?.map((item, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "5px 0", borderBottom: "1px dashed #f0d6eb" }}>
+              <span>{item.name} × {item.qty}</span>
+              <span style={{ fontWeight: 600 }}>{formatRp(item.price * item.qty)}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ background: "#dbeafe", borderRadius: 10, padding: "12px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#9a7aaa", marginBottom: 4 }}>
             <span>Subtotal</span><span>{formatRp(invoice.subtotal)}</span>
           </div>
           {invoice.discount > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#c0392b", marginBottom: 4 }}>
-              <span>Diskon</span><span>- {formatRp(invoice.discount)}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#ef4444", marginBottom: 4 }}>
+              <span>🏷️ Diskon</span><span>- {formatRp(invoice.discount)}</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginTop: 4 }}>
-            <span>TOTAL</span><span style={{ color: "#e8a020" }}>{formatRp(invoice.total)}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 18, marginTop: 6 }}>
+            <span>TOTAL</span><span style={{ color: "#e91e8c" }}>{formatRp(invoice.total)}</span>
           </div>
         </div>
-        <div style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "#aaa" }}>Terima kasih sudah berbelanja! 🙏</div>
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "#9a7aaa" }}>🌸 Terima kasih sudah berbelanja! 🌸</div>
       </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button onClick={print} style={{ flex: 1, padding: "11px 0", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>🖨️ Print</button>
-        <button onClick={onClose} style={{ flex: 1, padding: "11px 0", background: "#f5f5f5", color: "#333", border: "1px solid #ddd", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>← Kembali</button>
+      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <button onClick={() => window.print()} style={{ flex: 1, padding: "12px 0", background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer" }}>🖨️ Print</button>
+        <button onClick={onClose} style={{ flex: 1, padding: "12px 0", background: "#fff", color: "#2d1a35", border: "1.5px solid #f0d6eb", borderRadius: 12, fontWeight: 600, cursor: "pointer" }}>← Kembali</button>
       </div>
     </div>
   );
@@ -446,10 +431,10 @@ function Inventory({ items, onRefresh, showToast }) {
       const payload = { ...form, price: Number(form.price) || 0, cost: Number(form.cost) || 0, stock: Number(form.stock) || 0 };
       if (editing) {
         await api(`kr_items?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
-        showToast("Item diperbarui");
+        showToast("✅ Item diperbarui!");
       } else {
         await api("kr_items", { method: "POST", body: JSON.stringify(payload), prefer: "return=minimal" });
-        showToast("Item ditambahkan");
+        showToast("✨ Item ditambahkan!");
       }
       setShowForm(false); onRefresh();
     } catch (e) { showToast("Error: " + e.message, "error"); }
@@ -468,44 +453,32 @@ function Inventory({ items, onRefresh, showToast }) {
 
   if (showForm) return (
     <div style={{ maxWidth: 560 }}>
-      <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>{editing ? "Edit Item" : "Tambah Item Baru"}</div>
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 20, color: "#2d1a35" }}>{editing ? "✏️ Edit Item" : "✨ Tambah Item Baru"}</div>
+      <div style={{ ...CARD, padding: 28, display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
-          <label style={{ fontSize: 13, color: "#666", display: "block", marginBottom: 4 }}>Tipe *</label>
+          <label style={{ fontSize: 13, color: "#9a7aaa", display: "block", marginBottom: 8, fontWeight: 600 }}>Tipe Item *</label>
           <div style={{ display: "flex", gap: 8 }}>
-            {[["product", "📦 Produk"], ["workshop", "🎓 Workshop"], ["equipment", "🔧 Perlengkapan"]].map(([v, l]) => (
-              <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} style={{
-                flex: 1, padding: "8px 0", border: `2px solid ${form.type === v ? "#e8a020" : "#ddd"}`,
-                borderRadius: 8, background: form.type === v ? "#fff8e6" : "#fff", color: form.type === v ? "#e8a020" : "#555",
-                fontWeight: form.type === v ? 700 : 400, cursor: "pointer", fontSize: 12,
-              }}>{l}</button>
-            ))}
+            {[["product", "📦 Produk"], ["workshop", "🎓 Workshop"], ["equipment", "🔧 Perlengkapan"]].map(([v, l]) => {
+              const c = ITEM_COLORS[v];
+              return (
+                <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} style={{ flex: 1, padding: "10px 0", border: `2px solid ${form.type === v ? c.text : "#f0d6eb"}`, borderRadius: 10, background: form.type === v ? c.bg : "#fff", color: form.type === v ? c.text : "#9a7aaa", fontWeight: form.type === v ? 700 : 500, cursor: "pointer", fontSize: 12 }}>{l}</button>
+              );
+            })}
           </div>
         </div>
-        {[
-          ["name", "Nama *", "text", "Nama produk/workshop..."],
-          ["sku", "SKU / Kode", "text", "Opsional"],
-          ["unit", "Satuan", "text", "pcs, lembar, slot, dll"],
-          ["price", "Harga Jual (Rp) *", "number", "0"],
-          ["cost", "Harga Modal (Rp)", "number", "0"],
-          ["stock", "Stok Awal", "number", "0"],
-        ].map(([k, l, t, ph]) => (
+        {[["name","Nama *","text","Nama produk / workshop..."],["sku","SKU / Kode","text","Opsional"],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal","number","0"]].map(([k,l,t,ph]) => (
           <div key={k}>
-            <label style={{ fontSize: 13, color: "#666", display: "block", marginBottom: 4 }}>{l}</label>
-            <input type={t} placeholder={ph} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
-              style={{ width: "100%", padding: "9px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
+            <label style={{ fontSize: 13, color: "#9a7aaa", display: "block", marginBottom: 5, fontWeight: 600 }}>{l}</label>
+            <input type={t} placeholder={ph} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
           </div>
         ))}
         <div>
-          <label style={{ fontSize: 13, color: "#666", display: "block", marginBottom: 4 }}>Keterangan</label>
-          <textarea rows={2} placeholder="Deskripsi opsional..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            style={{ width: "100%", padding: "9px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
+          <label style={{ fontSize: 13, color: "#9a7aaa", display: "block", marginBottom: 5, fontWeight: 600 }}>Keterangan</label>
+          <textarea rows={2} placeholder="Deskripsi opsional..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-          <button onClick={save} style={{ flex: 1, padding: "11px 0", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>
-            {editing ? "Simpan Perubahan" : "Tambah Item"}
-          </button>
-          <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: "11px 0", background: "#f5f5f5", color: "#333", border: "1px solid #ddd", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>Batal</button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={save} style={{ flex: 1, padding: "13px 0", background: "linear-gradient(135deg, #e91e8c, #7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 14 }}>{editing ? "💾 Simpan" : "✨ Tambah Item"}</button>
+          <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: "13px 0", background: "#fff", color: "#2d1a35", border: "1.5px solid #f0d6eb", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 14 }}>Batal</button>
         </div>
       </div>
     </div>
@@ -513,61 +486,52 @@ function Inventory({ items, onRefresh, showToast }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", gap: 10 }}>
-          {[["all", "Semua"], ["product", "Produk"], ["workshop", "Workshop"], ["equipment", "Perlengkapan"]].map(([v, l]) => (
-            <button key={v} onClick={() => setFilter(v)} style={{
-              padding: "7px 14px", borderRadius: 20, border: `1px solid ${filter === v ? "#e8a020" : "#ddd"}`,
-              background: filter === v ? "#fff8e6" : "#fff", color: filter === v ? "#e8a020" : "#555",
-              fontWeight: filter === v ? 700 : 400, cursor: "pointer", fontSize: 13,
-            }}>{l} <span style={{ fontSize: 11, opacity: 0.7 }}>({stats[v]})</span></button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[["all","✨ Semua"],["product","📦 Produk"],["workshop","🎓 Workshop"],["equipment","🔧 Perlengkapan"]].map(([v,l]) => (
+            <button key={v} onClick={() => setFilter(v)} style={{ padding: "8px 16px", borderRadius: 20, border: `2px solid ${filter === v ? "#e91e8c" : "#f0d6eb"}`, background: filter === v ? "#fce4f3" : "#fff", color: filter === v ? "#e91e8c" : "#9a7aaa", fontWeight: filter === v ? 700 : 500, cursor: "pointer", fontSize: 13 }}>{l} <span style={{ opacity: 0.7, fontSize: 11 }}>({stats[v]})</span></button>
           ))}
         </div>
-        <button onClick={openNew} style={{ padding: "10px 18px", background: "#e8a020", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
-          + Tambah Item
-        </button>
+        <button onClick={openNew} style={{ padding: "10px 20px", background: "linear-gradient(135deg, #e91e8c, #7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>✨ Tambah Item</button>
       </div>
 
       {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "80px 0", color: "#bbb" }}>
-          <div style={{ fontSize: 48, marginBottom: 8 }}>📦</div>
-          <div style={{ fontSize: 16, marginBottom: 4 }}>Belum ada item</div>
-          <button onClick={openNew} style={{ marginTop: 12, padding: "10px 20px", background: "#e8a020", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>Tambah Sekarang</button>
+        <div style={{ textAlign: "center", padding: "80px 0", color: "#9a7aaa" }}>
+          <div style={{ fontSize: 52, marginBottom: 10 }}>🌸</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Belum ada item</div>
+          <button onClick={openNew} style={{ marginTop: 14, padding: "11px 24px", background: "linear-gradient(135deg,#e91e8c,#7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer" }}>Tambah Sekarang</button>
         </div>
       ) : (
-        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", overflow: "hidden" }}>
+        <div style={{ ...CARD, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "#f8f8f8" }}>
-                {["Nama", "Tipe", "SKU", "Satuan", "Harga Jual", "Modal", "Stok", "Aksi"].map(h => (
-                  <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "#666", fontWeight: 600, borderBottom: "1px solid #eee" }}>{h}</th>
+              <tr style={{ background: "linear-gradient(135deg, #fce4f3, #dbeafe)" }}>
+                {["Nama","Tipe","SKU","Satuan","Harga Jual","Modal","Stok","Aksi"].map(h => (
+                  <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "#2d1a35", fontWeight: 700, borderBottom: "2px solid #f0d6eb" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(item => (
-                <tr key={item.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
-                  <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 500 }}>{item.name}</td>
-                  <td style={{ padding: "12px 14px" }}>
-                    <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, background: COLORS[item.type].bg, color: COLORS[item.type].text, fontWeight: 600 }}>
-                      {COLORS[item.type].label}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 14px", fontSize: 13, color: "#888" }}>{item.sku || "—"}</td>
-                  <td style={{ padding: "12px 14px", fontSize: 13 }}>{item.unit}</td>
-                  <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 600, color: "#1a1a2e" }}>{formatRp(item.price)}</td>
-                  <td style={{ padding: "12px 14px", fontSize: 13, color: "#888" }}>{formatRp(item.cost)}</td>
-                  <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 600, color: item.stock <= 5 && item.type !== "workshop" ? "#c0392b" : "#27ae60" }}>
-                    {item.type === "workshop" ? "—" : `${item.stock} ${item.unit}`}
-                  </td>
-                  <td style={{ padding: "12px 14px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => openEdit(item)} style={{ padding: "5px 10px", background: "#f0f0f0", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>Edit</button>
-                      <button onClick={() => deactivate(item.id)} style={{ padding: "5px 10px", background: "#ffeaea", color: "#c0392b", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>Nonaktif</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(item => {
+                const c = ITEM_COLORS[item.type];
+                return (
+                  <tr key={item.id} style={{ borderBottom: "1px solid #f0d6eb" }}>
+                    <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 600, color: "#2d1a35" }}>{item.name}</td>
+                    <td style={{ padding: "12px 14px" }}><span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</span></td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, color: "#9a7aaa" }}>{item.sku || "—"}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13 }}>{item.unit}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 700, color: "#e91e8c" }}>{formatRp(item.price)}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, color: "#9a7aaa" }}>{formatRp(item.cost)}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 700, color: item.stock <= 5 && item.type !== "workshop" ? "#ef4444" : "#10b981" }}>{item.type === "workshop" ? "—" : `${item.stock} ${item.unit}`}</td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => openEdit(item)} style={{ padding: "5px 12px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
+                        <button onClick={() => deactivate(item.id)} style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -592,7 +556,7 @@ function StockMoves({ items, moves, onRefresh, showToast }) {
       await api(`kr_items?id=eq.${form.item_id}`, { method: "PATCH", body: JSON.stringify({ stock: newStock }), prefer: "return=minimal" });
       setForm({ item_id: "", direction: "in", qty: "", note: "" });
       onRefresh();
-      showToast(`Stok ${form.direction === "in" ? "masuk" : "keluar"} dicatat`);
+      showToast(`${form.direction === "in" ? "📥 Stok masuk" : "📤 Stok keluar"} dicatat!`);
     } catch (e) { showToast("Error: " + e.message, "error"); }
     setSaving(false);
   };
@@ -600,74 +564,64 @@ function StockMoves({ items, moves, onRefresh, showToast }) {
   const itemMap = Object.fromEntries(items.map(i => [i.id, i]));
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 20, height: "fit-content" }}>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>Catat Mutasi Stok</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          {[["in", "📥 Masuk"], ["out", "📤 Keluar"]].map(([v, l]) => (
-            <button key={v} onClick={() => setForm(f => ({ ...f, direction: v }))} style={{
-              flex: 1, padding: "9px 0", border: `2px solid ${form.direction === v ? (v === "in" ? "#27ae60" : "#e74c3c") : "#ddd"}`,
-              borderRadius: 8, background: form.direction === v ? (v === "in" ? "#edfaf4" : "#fdeaea") : "#fff",
-              color: form.direction === v ? (v === "in" ? "#27ae60" : "#e74c3c") : "#555",
-              fontWeight: form.direction === v ? 700 : 400, cursor: "pointer", fontSize: 13,
-            }}>{l}</button>
+    <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 24 }}>
+      <div style={{ ...CARD, padding: 22, height: "fit-content" }}>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 18, color: "#2d1a35" }}>↕️ Catat Mutasi Stok</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {[["in","📥 Masuk"],["out","📤 Keluar"]].map(([v,l]) => (
+            <button key={v} onClick={() => setForm(f => ({ ...f, direction: v }))} style={{ flex: 1, padding: "10px 0", border: `2px solid ${form.direction === v ? (v==="in"?"#10b981":"#ef4444") : "#f0d6eb"}`, borderRadius: 10, background: form.direction === v ? (v==="in"?"#d1fae5":"#fee2e2") : "#fff", color: form.direction === v ? (v==="in"?"#10b981":"#ef4444") : "#9a7aaa", fontWeight: form.direction === v ? 700 : 500, cursor: "pointer", fontSize: 13 }}>{l}</button>
           ))}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
-            <label style={{ fontSize: 13, color: "#666", display: "block", marginBottom: 4 }}>Item *</label>
-            <select value={form.item_id} onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))}
-              style={{ width: "100%", padding: "9px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14 }}>
+            <label style={{ fontSize: 13, color: "#9a7aaa", display: "block", marginBottom: 5, fontWeight: 600 }}>Item *</label>
+            <select value={form.item_id} onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 14 }}>
               <option value="">— Pilih item —</option>
               {items.filter(i => i.type !== "workshop").map(i => <option key={i.id} value={i.id}>{i.name} (stok: {i.stock})</option>)}
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 13, color: "#666", display: "block", marginBottom: 4 }}>Jumlah *</label>
-            <input type="number" min={1} placeholder="0" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
-              style={{ width: "100%", padding: "9px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
+            <label style={{ fontSize: 13, color: "#9a7aaa", display: "block", marginBottom: 5, fontWeight: 600 }}>Jumlah *</label>
+            <input type="number" min={1} placeholder="0" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
           </div>
           <div>
-            <label style={{ fontSize: 13, color: "#666", display: "block", marginBottom: 4 }}>Keterangan</label>
-            <input placeholder="Contoh: Restock dari supplier..." value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
-              style={{ width: "100%", padding: "9px 12px", border: "1px solid #ddd", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
+            <label style={{ fontSize: 13, color: "#9a7aaa", display: "block", marginBottom: 5, fontWeight: 600 }}>Keterangan</label>
+            <input placeholder="Contoh: Restock dari supplier..." value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #f0d6eb", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
           </div>
-          <button onClick={save} disabled={saving} style={{
-            padding: "11px 0", background: saving ? "#ccc" : "#1a1a2e",
-            color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
-          }}>{saving ? "Menyimpan..." : "Simpan Mutasi"}</button>
+          <button onClick={save} disabled={saving} style={{ padding: "12px 0", background: saving ? "#ddd" : "linear-gradient(135deg,#e91e8c,#7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", fontSize: 14 }}>
+            {saving ? "⏳ Menyimpan..." : "💾 Simpan Mutasi"}
+          </button>
         </div>
       </div>
 
       <div>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 14 }}>Riwayat Mutasi Stok</div>
-        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", overflow: "hidden" }}>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14, color: "#2d1a35" }}>📋 Riwayat Mutasi Stok</div>
+        <div style={{ ...CARD, overflow: "hidden" }}>
           {moves.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#bbb" }}>Belum ada mutasi stok</div>
+            <div style={{ textAlign: "center", padding: "60px 0", color: "#9a7aaa" }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>📋</div>Belum ada mutasi stok
+            </div>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ background: "#f8f8f8" }}>
-                  {["Waktu", "Item", "Arah", "Qty", "Keterangan"].map(h => (
-                    <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#666", fontWeight: 600, borderBottom: "1px solid #eee" }}>{h}</th>
+                <tr style={{ background: "linear-gradient(135deg,#fce4f3,#dbeafe)" }}>
+                  {["Waktu","Item","Arah","Qty","Keterangan"].map(h => (
+                    <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#2d1a35", fontWeight: 700, borderBottom: "2px solid #f0d6eb" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {moves.map(m => (
-                  <tr key={m.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
-                    <td style={{ padding: "10px 14px", fontSize: 12, color: "#888" }}>{formatDate(m.created_at)}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 500 }}>{itemMap[m.item_id]?.name || "—"}</td>
+                  <tr key={m.id} style={{ borderBottom: "1px solid #f0d6eb" }}>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: "#9a7aaa" }}>{formatDate(m.created_at)}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600 }}>{itemMap[m.item_id]?.name || "—"}</td>
                     <td style={{ padding: "10px 14px" }}>
-                      <span style={{ fontSize: 12, padding: "3px 8px", borderRadius: 4, fontWeight: 600,
-                        background: m.direction === "in" ? "#edfaf4" : "#fdeaea",
-                        color: m.direction === "in" ? "#27ae60" : "#e74c3c",
-                      }}>
+                      <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: m.direction === "in" ? "#d1fae5" : "#fee2e2", color: m.direction === "in" ? "#10b981" : "#ef4444" }}>
                         {m.direction === "in" ? "📥 Masuk" : "📤 Keluar"}
                       </span>
                     </td>
-                    <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 700 }}>{m.qty}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 13, color: "#666" }}>{m.note || "—"}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 15, fontWeight: 800 }}>{m.qty}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, color: "#9a7aaa" }}>{m.note || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -691,59 +645,56 @@ function Sales({ orders, items, onRefresh, showToast }) {
 
   const openDetail = async (order) => {
     setDetail(order); setLoadingDetail(true);
-    try {
-      const data = await api(`kr_order_items?order_id=eq.${order.id}`);
-      setOrderItems(data);
-    } catch {}
+    try { setOrderItems(await api(`kr_order_items?order_id=eq.${order.id}`)); } catch {}
     setLoadingDetail(false);
   };
 
+  const statCards = [
+    { label: "Total Transaksi", value: orders.length, icon: "🧾", accent: "#2563eb", bg: "#dbeafe" },
+    { label: "Transaksi Hari Ini", value: todayOrders.length, icon: "📅", accent: "#7c3aed", bg: "#ede9fe" },
+    { label: "Omzet Hari Ini", value: formatRp(todayRevenue), icon: "💰", accent: "#e91e8c", bg: "#fce4f3" },
+    { label: "Total Omzet", value: formatRp(totalRevenue), icon: "📈", accent: "#10b981", bg: "#d1fae5" },
+  ];
+
   return (
     <div>
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 }}>
-        {[
-          ["Total Transaksi", orders.length, "🧾"],
-          ["Transaksi Hari Ini", todayOrders.length, "📅"],
-          ["Omzet Hari Ini", formatRp(todayRevenue), "💰"],
-          ["Total Omzet", formatRp(totalRevenue), "📈"],
-        ].map(([l, v, icon]) => (
-          <div key={l} style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e5e5", padding: "16px 18px" }}>
-            <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{icon} {l}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e" }}>{v}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+        {statCards.map(s => (
+          <div key={s.label} style={{ ...CARD, padding: "18px 20px", borderTop: `4px solid ${s.accent}` }}>
+            <div style={{ fontSize: 12, color: "#9a7aaa", marginBottom: 8, fontWeight: 600 }}>{s.icon} {s.label}</div>
+            <div style={{ fontSize: 21, fontWeight: 800, color: s.accent }}>{s.value}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: detail ? "1fr 360px" : "1fr", gap: 20 }}>
-        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", overflow: "hidden" }}>
-          <div style={{ padding: "14px 18px", borderBottom: "1px solid #eee", fontWeight: 700, fontSize: 15 }}>Riwayat Penjualan</div>
+      <div style={{ display: "grid", gridTemplateColumns: detail ? "1fr 370px" : "1fr", gap: 20 }}>
+        <div style={{ ...CARD, overflow: "hidden" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "2px solid #f0d6eb", fontWeight: 800, fontSize: 16, background: "linear-gradient(135deg,#fce4f3,#dbeafe)" }}>📊 Riwayat Penjualan</div>
           {orders.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#bbb" }}>Belum ada penjualan</div>
+            <div style={{ textAlign: "center", padding: "60px 0", color: "#9a7aaa" }}><div style={{ fontSize: 40, marginBottom: 8 }}>📊</div>Belum ada penjualan</div>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ background: "#f8f8f8" }}>
-                  {["No Order", "Waktu", "Customer", "Pembayaran", "Total", "Status", ""].map(h => (
-                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, color: "#666", fontWeight: 600, borderBottom: "1px solid #eee" }}>{h}</th>
+                <tr style={{ background: "#fafafa" }}>
+                  {["No Order","Waktu","Customer","Pembayaran","Total","Status",""].map(h => (
+                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, color: "#9a7aaa", fontWeight: 700, borderBottom: "1.5px solid #f0d6eb" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {orders.map(o => (
-                  <tr key={o.id} onClick={() => openDetail(o)} style={{ borderBottom: "1px solid #f5f5f5", cursor: "pointer", background: detail?.id === o.id ? "#fff8e6" : "transparent" }}>
-                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, color: "#e8a020" }}>{o.order_no}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 12, color: "#888" }}>{formatDate(o.created_at)}</td>
+                  <tr key={o.id} onClick={() => openDetail(o)} style={{ borderBottom: "1px solid #f0d6eb", cursor: "pointer", background: detail?.id === o.id ? "#fce4f3" : "transparent" }}>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "#e91e8c" }}>{o.order_no}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: "#9a7aaa" }}>{formatDate(o.created_at)}</td>
                     <td style={{ padding: "10px 14px", fontSize: 13 }}>{o.customer_name || "Umum"}</td>
                     <td style={{ padding: "10px 14px", fontSize: 13 }}>{o.payment_method === "cash" ? "💵 Tunai" : "📲 QRIS"}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 700 }}>{formatRp(o.total)}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 800, color: "#e91e8c" }}>{formatRp(o.total)}</td>
                     <td style={{ padding: "10px 14px" }}>
-                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, fontWeight: 600,
-                        background: o.status === "paid" ? "#edfaf4" : "#fff3e0",
-                        color: o.status === "paid" ? "#27ae60" : "#e8a020",
-                      }}>{o.status === "paid" ? "Lunas" : "Pending"}</span>
+                      <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: o.status === "paid" ? "#d1fae5" : "#fef3c7", color: o.status === "paid" ? "#10b981" : "#f59e0b" }}>
+                        {o.status === "paid" ? "✅ Lunas" : "⏳ Pending"}
+                      </span>
                     </td>
-                    <td style={{ padding: "10px 14px", fontSize: 12, color: "#888" }}>→</td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: "#9a7aaa" }}>→</td>
                   </tr>
                 ))}
               </tbody>
@@ -752,38 +703,38 @@ function Sales({ orders, items, onRefresh, showToast }) {
         </div>
 
         {detail && (
-          <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 20, height: "fit-content", position: "sticky", top: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div style={{ fontWeight: 700 }}>Detail {detail.order_no}</div>
-              <button onClick={() => setDetail(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#888" }}>×</button>
+          <div style={{ ...CARD, padding: 20, height: "fit-content", position: "sticky", top: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "#e91e8c" }}>{detail.order_no}</div>
+              <button onClick={() => setDetail(null)} style={{ background: "#fce4f3", border: "none", cursor: "pointer", fontSize: 16, color: "#e91e8c", borderRadius: 8, width: 28, height: 28 }}>×</button>
             </div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
-              <div>Customer: <b>{detail.customer_name || "Umum"}</b></div>
-              {detail.customer_phone && <div>HP: {detail.customer_phone}</div>}
-              <div>Pembayaran: {detail.payment_method === "cash" ? "💵 Tunai" : "📲 QRIS"}</div>
-              <div>Waktu: {formatDate(detail.created_at)}</div>
+            <div style={{ background: "#dbeafe", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 12, lineHeight: 1.8 }}>
+              <div>👤 <b>{detail.customer_name || "Umum"}</b></div>
+              {detail.customer_phone && <div>📱 {detail.customer_phone}</div>}
+              <div>💳 {detail.payment_method === "cash" ? "💵 Tunai" : "📲 QRIS"}</div>
+              <div>🕐 {formatDate(detail.created_at)}</div>
             </div>
-            {loadingDetail ? <div style={{ textAlign: "center", padding: 20, color: "#888" }}>Memuat...</div> : (
+            {loadingDetail ? <div style={{ textAlign: "center", padding: 20, color: "#9a7aaa" }}>Memuat...</div> : (
               <>
-                <div style={{ borderTop: "1px solid #eee", paddingTop: 12, marginBottom: 12 }}>
+                <div style={{ marginBottom: 12 }}>
                   {orderItems.map((oi, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "5px 0" }}>
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0", borderBottom: "1px dashed #f0d6eb" }}>
                       <span>{oi.item_name} × {oi.qty}</span>
-                      <span>{formatRp(oi.subtotal)}</span>
+                      <span style={{ fontWeight: 600 }}>{formatRp(oi.subtotal)}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ borderTop: "1px solid #eee", paddingTop: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666", marginBottom: 4 }}>
+                <div style={{ background: "#fce4f3", borderRadius: 10, padding: "10px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#9a7aaa", marginBottom: 4 }}>
                     <span>Subtotal</span><span>{formatRp(detail.subtotal)}</span>
                   </div>
                   {detail.discount > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#c0392b", marginBottom: 4 }}>
-                      <span>Diskon</span><span>- {formatRp(detail.discount)}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#ef4444", marginBottom: 4 }}>
+                      <span>🏷️ Diskon</span><span>- {formatRp(detail.discount)}</span>
                     </div>
                   )}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16 }}>
-                    <span>Total</span><span style={{ color: "#e8a020" }}>{formatRp(detail.total)}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 17, marginTop: 6 }}>
+                    <span>Total</span><span style={{ color: "#e91e8c" }}>{formatRp(detail.total)}</span>
                   </div>
                 </div>
               </>
@@ -804,13 +755,13 @@ function Setup({ setupSql, showToast, onRefresh }) {
     setTesting(true); setStatus(null);
     try {
       await api("kr_items?limit=1");
-      setStatus({ ok: true, msg: "✓ Tabel sudah ada dan terhubung! Sistem siap digunakan." });
+      setStatus({ ok: true, msg: "✅ Tabel sudah ada dan terhubung! Sistem siap digunakan." });
       onRefresh();
     } catch (e) {
       if (e.message.includes("does not exist") || e.message.includes("42P01")) {
-        setStatus({ ok: false, msg: "Tabel belum ada. Jalankan SQL di bawah di Supabase SQL Editor." });
+        setStatus({ ok: false, msg: "⚠️ Tabel belum ada. Jalankan SQL di bawah di Supabase SQL Editor." });
       } else {
-        setStatus({ ok: false, msg: "Error: " + e.message });
+        setStatus({ ok: false, msg: "❌ Error: " + e.message });
       }
     }
     setTesting(false);
@@ -818,44 +769,33 @@ function Setup({ setupSql, showToast, onRefresh }) {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Setup Database</div>
-      <div style={{ fontSize: 14, color: "#666", marginBottom: 20, lineHeight: 1.6 }}>
-        Jalankan langkah berikut untuk menginisialisasi database KURESAPI di Supabase.
-      </div>
+      <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 6, color: "#2d1a35" }}>⚙️ Setup Database</div>
+      <div style={{ fontSize: 14, color: "#9a7aaa", marginBottom: 22, lineHeight: 1.7 }}>Jalankan langkah berikut untuk menginisialisasi database KURESAPI di Supabase.</div>
 
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 24, marginBottom: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12 }}>Langkah 1 — Cek koneksi</div>
-        <button onClick={testConn} disabled={testing} style={{
-          padding: "10px 20px", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: testing ? "not-allowed" : "pointer",
-        }}>{testing ? "Mengecek..." : "🔌 Test Koneksi"}</button>
+      <div style={{ ...CARD, padding: 24, marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>Langkah 1 — Cek koneksi</div>
+        <button onClick={testConn} disabled={testing} style={{ padding: "11px 22px", background: testing ? "#ddd" : "linear-gradient(135deg,#2563eb,#7c3aed)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: testing ? "not-allowed" : "pointer", fontSize: 14 }}>
+          {testing ? "⏳ Mengecek..." : "🔌 Test Koneksi"}
+        </button>
         {status && (
-          <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 8, background: status.ok ? "#edfaf4" : "#fdeaea", color: status.ok ? "#27ae60" : "#c0392b", fontSize: 14, fontWeight: 500 }}>
-            {status.msg}
-          </div>
+          <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 10, background: status.ok ? "#d1fae5" : "#fee2e2", color: status.ok ? "#10b981" : "#ef4444", fontSize: 14, fontWeight: 600 }}>{status.msg}</div>
         )}
       </div>
 
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e5e5", padding: 24 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Langkah 2 — Buat tabel (jika belum ada)</div>
-        <div style={{ fontSize: 13, color: "#888", marginBottom: 12 }}>
-          Buka <b>Supabase Dashboard → SQL Editor</b>, paste SQL berikut lalu klik Run:
-        </div>
-        <pre style={{ background: "#f5f5f5", borderRadius: 8, padding: 16, fontSize: 12, overflow: "auto", maxHeight: 360, lineHeight: 1.6, color: "#333" }}>
-          {setupSql}
-        </pre>
-        <button onClick={() => { navigator.clipboard.writeText(setupSql); showToast("SQL disalin ke clipboard!"); }}
-          style={{ marginTop: 12, padding: "9px 16px", background: "#f0f0f0", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-          📋 Salin SQL
-        </button>
+      <div style={{ ...CARD, padding: 24, marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Langkah 2 — Buat tabel (jika belum ada)</div>
+        <div style={{ fontSize: 13, color: "#9a7aaa", marginBottom: 12 }}>Buka <b>Supabase Dashboard → SQL Editor</b>, paste SQL berikut lalu klik Run:</div>
+        <pre style={{ background: "#1e1e2e", color: "#cdd6f4", borderRadius: 10, padding: 16, fontSize: 12, overflow: "auto", maxHeight: 340, lineHeight: 1.7 }}>{setupSql}</pre>
+        <button onClick={() => { navigator.clipboard.writeText(setupSql); showToast("📋 SQL disalin!"); }} style={{ marginTop: 12, padding: "9px 18px", background: "#fff", color: "#2d1a35", border: "1.5px solid #f0d6eb", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>📋 Salin SQL</button>
       </div>
 
-      <div style={{ background: "#fff8e6", borderRadius: 12, border: "1px solid #fcd97a", padding: 18, marginTop: 20 }}>
-        <div style={{ fontWeight: 600, color: "#a86a00", marginBottom: 6 }}>📝 Info Tabel</div>
-        <div style={{ fontSize: 13, color: "#7a5200", lineHeight: 1.7 }}>
-          <b>kr_items</b> — Produk, workshop, & perlengkapan<br />
-          <b>kr_stock_moves</b> — Riwayat mutasi stok masuk/keluar<br />
-          <b>kr_orders</b> — Transaksi penjualan<br />
-          <b>kr_order_items</b> — Detail item per transaksi
+      <div style={{ background: "#fce4f3", borderRadius: 14, border: "1.5px solid #f48cc8", padding: 20 }}>
+        <div style={{ fontWeight: 700, color: "#e91e8c", marginBottom: 8 }}>📝 Tabel yang dibuat</div>
+        <div style={{ fontSize: 13, color: "#2d1a35", lineHeight: 2 }}>
+          <span style={{ background: "#dbeafe", color: "#2563eb", borderRadius: 6, padding: "2px 8px", fontWeight: 700, marginRight: 6 }}>kr_items</span> Produk, workshop & perlengkapan<br />
+          <span style={{ background: "#dbeafe", color: "#2563eb", borderRadius: 6, padding: "2px 8px", fontWeight: 700, marginRight: 6 }}>kr_stock_moves</span> Riwayat mutasi stok<br />
+          <span style={{ background: "#dbeafe", color: "#2563eb", borderRadius: 6, padding: "2px 8px", fontWeight: 700, marginRight: 6 }}>kr_orders</span> Transaksi penjualan<br />
+          <span style={{ background: "#dbeafe", color: "#2563eb", borderRadius: 6, padding: "2px 8px", fontWeight: 700, marginRight: 6 }}>kr_order_items</span> Detail item per transaksi
         </div>
       </div>
     </div>
