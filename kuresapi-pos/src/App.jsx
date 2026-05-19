@@ -1387,7 +1387,7 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
             event: cols[iEvent]||"",
             amount: Number((cols[iAmount]||"0").toString().replace(/[^\d.]/g,""))||0,
             pic: cols[iPic]||"",
-            status: (s.includes("done")||s.includes("paid")||s.includes("lunas")) ? "paid" : "unpaid",
+            status: (s === "paid" || s === "done" || s === "lunas") ? "paid" : "unpaid",
             transaction_date: dateVal && dateVal !== "" ? dateVal : null,
             notes: cols[iNotes]||"",
           };
