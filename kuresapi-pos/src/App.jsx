@@ -621,14 +621,21 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
 
   // ── EXPORT ke Excel ──────────────────────────────────────────────────────
   const exportExcel = () => {
-    const rows = [["Nama", "Tipe", "SKU", "Harga Jual", "Harga Modal", "Stok", "Satuan", "Keterangan"]];
-    items.forEach(i => rows.push([i.name, i.type, i.sku || "", i.price, i.cost, i.stock, i.unit, i.description || ""]));
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `KURESAPI_Inventory_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
+    const rows = items.map(i => ({
+      "Nama": i.name,
+      "Tipe": i.type,
+      "SKU": i.sku || "",
+      "Harga Jual": i.price,
+      "Harga Modal": i.cost,
+      "Stok": i.stock,
+      "Satuan": i.unit,
+      "Keterangan": i.description || "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+    ws["!cols"] = [35,12,10,14,14,8,10,30].map(w => ({ wch: w }));
+    XLSX.writeFile(wb, `KURESAPI_Inventory_${new Date().toISOString().slice(0,10)}.xlsx`);
     showToast("📥 Export berhasil!");
   };
 
@@ -639,14 +646,12 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     e.target.value = "";
     setImporting(true);
     try {
-      // Gunakan SheetJS via CDN untuk baca Excel/CSV
-      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs");
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
-      if (!rows.length) return showToast("File kosong atau format tidak dikenali", "error");
+      if (!rows.length) { showToast("File kosong atau format tidak dikenali", "error"); setImporting(false); return; }
 
       // Mapping fleksibel — coba berbagai nama kolom
       const get = (row, ...keys) => {
@@ -664,7 +669,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
           type: (() => {
             const t = String(get(r, "type","tipe","kategori","category") || "product").toLowerCase();
             if (t.includes("workshop")) return "workshop";
-            if (t.includes("equipment","perlengkapan","alat")) return "equipment";
+            if (t.includes("equipment") || t.includes("perlengkapan") || t.includes("alat")) return "equipment";
             return "product";
           })(),
           sku:   String(get(r, "sku","kode","itemid","item id") || ""),
@@ -676,9 +681,8 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
           is_active: true,
         }));
 
-      if (!toImport.length) return showToast("Tidak ada data valid yang bisa diimport", "error");
+      if (!toImport.length) { showToast("Tidak ada data valid yang bisa diimport", "error"); setImporting(false); return; }
 
-      // Upload ke Supabase satu per satu (batch)
       let success = 0, fail = 0;
       for (const item of toImport) {
         try {
