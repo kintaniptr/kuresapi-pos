@@ -1323,7 +1323,9 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
     e.target.value = "";
     setImporting(true);
     try {
-      const text = await file.text();
+      let text = await file.text();
+      // Hapus BOM jika ada
+      text = text.replace(/^\uFEFF/, "");
       const lines = text.split(/\r?\n/).filter(l => l.trim());
       if (lines.length < 2) { showToast("File kosong!", "error"); setImporting(false); return; }
 
@@ -1339,31 +1341,38 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
         return cols;
       };
 
-      const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/\s/g,""));
-      const idx = (keys) => { for (const k of keys) { const i = headers.indexOf(k.toLowerCase().replace(/\s/g,"")); if (i>=0) return i; } return -1; };
+      const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/[\s_-]/g,""));
+      const idx = (keys) => {
+        for (const k of keys) {
+          const i = headers.indexOf(k.toLowerCase().replace(/[\s_-]/g,""));
+          if (i >= 0) return i;
+        }
+        return -1;
+      };
 
-      const iDetail  = idx(["expensedetails","expense details","detail","keterangan pengeluaran","detailpengeluaran"]);
-      const iEvent   = idx(["event","acara"]);
-      const iAmount  = idx(["jumlah","amount","nominal","harga","biaya"]);
-      const iPic     = idx(["pic","nama","person"]);
-      const iStatus  = idx(["status","statusreimbursement","status reimbursement"]);
-      const iDate    = idx(["tanggal","date","transactiondate","transaction date"]);
-      const iNotes   = idx(["catatan","notes","keterangan"]);
+      const iDetail = idx(["expensedetails","expense details","detail","pengeluaran","keterangan"]);
+      const iEvent  = idx(["event","acara"]);
+      const iAmount = idx(["jumlah","amount","nominal","harga","biaya"]);
+      const iPic    = idx(["pic","nama","person"]);
+      const iStatus = idx(["status","statusreimbursement"]);
+      const iDate   = idx(["tanggal","date","transactiondate"]);
+      const iNotes  = idx(["catatan","notes","keterangan"]);
 
-      if (iDetail < 0 && iAmount < 0) { showToast("Kolom tidak dikenali!", "error"); setImporting(false); return; }
+      if (iDetail < 0) { showToast(`Kolom 'Expense Details' tidak ditemukan! Headers: ${headers.join(", ")}`, "error"); setImporting(false); return; }
 
       const toImport = lines.slice(1)
         .map(l => parseRow(l))
         .filter(cols => cols[iDetail]?.trim())
         .map(cols => {
           const s = (cols[iStatus]||"").toLowerCase();
+          const dateVal = cols[iDate]?.trim() || null;
           return {
             expense_details: cols[iDetail]||"",
             event: cols[iEvent]||"",
-            amount: Number((cols[iAmount]||"0").replace(/[^\d.]/g,""))||0,
+            amount: Number((cols[iAmount]||"0").toString().replace(/[^\d.]/g,""))||0,
             pic: cols[iPic]||"",
             status: (s.includes("done")||s.includes("paid")||s.includes("lunas")) ? "paid" : "unpaid",
-            transaction_date: cols[iDate]||null,
+            transaction_date: dateVal && dateVal !== "" ? dateVal : null,
             notes: cols[iNotes]||"",
           };
         });
@@ -1494,22 +1503,23 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
 
       {/* Filter + Add */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: 1 }}>
           {[["all","Semua"],["unpaid","⏳ Belum Dibayar"],["paid","✅ Sudah Dibayar"]].map(([v,l]) => (
             <button key={v} onClick={() => setFilterStatus(v)} className="tap-btn" style={{
               padding: "7px 14px", borderRadius: 20, fontSize: 12, cursor: "pointer",
               border: `2px solid ${filterStatus === v ? "#2d4ba0" : "#d0e5f5"}`,
               background: filterStatus === v ? "#e4f3fd" : "#fff",
               color: filterStatus === v ? "#2d4ba0" : "#7a8ab0",
-              fontWeight: filterStatus === v ? 700 : 500,
+              fontWeight: filterStatus === v ? 700 : 500, whiteSpace: "nowrap",
             }}>{l} <span style={{ opacity: 0.7 }}>({reimburses.filter(r => v === "all" || r.status === v).length})</span></button>
           ))}
         </div>
-        <button onClick={openNew} className="tap-btn" style={{ padding: "9px 16px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Tambah</button>
-        <button onClick={exportCSV} className="tap-btn" style={{ padding: "9px 14px", background: "#e4f3fd", color: "#2d4ba0", border: "1.5px solid #a1def9", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>📥 Export</button>
-        <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13, flexShrink: 0 }}>
-          {importing ? "⏳ Import..." : "📤 Import CSV"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button onClick={openNew} className="tap-btn" style={{ padding: "9px 14px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Tambah</button>
+          <button onClick={exportCSV} className="tap-btn" style={{ padding: "9px 14px", background: "#e4f3fd", color: "#2d4ba0", border: "1.5px solid #a1def9", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 13 }}>📥 Export</button>
+          <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13 }}>
+            {importing ? "⏳..." : "📤 Import"}
+          </button>
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} style={{ display: "none" }} />
       </div>
 
