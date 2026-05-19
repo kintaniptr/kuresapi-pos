@@ -900,6 +900,9 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
   const [orderItems, setOrderItems] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [period, setPeriod] = useState("daily");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
 
   const deleteOrder = async (order) => {
     try {
@@ -909,32 +912,83 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
-  const totalRevenue = orders.filter(o => o.status === "paid").reduce((s, o) => s + (o.total || 0), 0);
-  const todayOrders = orders.filter(o => new Date(o.created_at).toDateString() === new Date().toDateString());
-  const todayRevenue = todayOrders.filter(o => o.status === "paid").reduce((s, o) => s + (o.total || 0), 0);
-
   const openDetail = async (order) => {
     setDetail(order); setLoadingDetail(true);
     try { setOrderItems(await api(`kr_order_items?order_id=eq.${order.id}`)); } catch {}
     setLoadingDetail(false);
   };
 
+  // Filter orders by period
+  const now = new Date();
+  const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+  const startOfWeek = () => { const d = startOfDay(now); d.setDate(d.getDate() - d.getDay()); return d; };
+  const startOfMonth = () => { const d = startOfDay(now); d.setDate(1); return d; };
+
+  const filteredOrders = orders.filter(o => {
+    const d = new Date(o.created_at);
+    if (period === "daily")   return d >= startOfDay(now);
+    if (period === "weekly")  return d >= startOfWeek();
+    if (period === "monthly") return d >= startOfMonth();
+    if (period === "custom" && customStart && customEnd) {
+      const s = startOfDay(new Date(customStart));
+      const e = new Date(new Date(customEnd).setHours(23,59,59,999));
+      return d >= s && d <= e;
+    }
+    return true;
+  });
+
+  const periodRevenue = filteredOrders.filter(o => o.status === "paid").reduce((s, o) => s + (o.total || 0), 0);
+  const totalRevenue = orders.filter(o => o.status === "paid").reduce((s, o) => s + (o.total || 0), 0);
+
+  const PERIODS = [
+    { id: "daily",   label: "Hari Ini" },
+    { id: "weekly",  label: "Minggu Ini" },
+    { id: "monthly", label: "Bulan Ini" },
+    { id: "all",     label: "Semua" },
+    { id: "custom",  label: "Custom" },
+  ];
+
   const statCards = [
-    { label: "Total Transaksi", value: orders.length, icon: "🧾", accent: "#2d4ba0" },
-    { label: "Hari Ini", value: todayOrders.length, icon: "📅", accent: "#1a3578" },
-    { label: "Omzet Hari Ini", value: formatRp(todayRevenue), icon: "💰", accent: "#ee4181" },
-    { label: "Total Omzet", value: formatRp(totalRevenue), icon: "📈", accent: "#10b981" },
+    { label: "Transaksi", value: filteredOrders.length, icon: "🧾", accent: "#2d4ba0" },
+    { label: "Omzet Periode", value: formatRp(periodRevenue), icon: "💰", accent: "#ee4181" },
+    { label: "Total Semua", value: formatRp(totalRevenue), icon: "📈", accent: "#10b981" },
+    { label: "Rata-rata", value: filteredOrders.length ? formatRp(Math.round(periodRevenue / filteredOrders.filter(o=>o.status==="paid").length || 0)) : "Rp 0", icon: "📊", accent: "#1a3578" },
   ];
 
   return (
     <div>
       {confirmDelete && <ConfirmModal title="Hapus Transaksi?" message={`Hapus transaksi ${confirmDelete.order_no} (${formatRp(confirmDelete.total)}) secara permanen?`} onConfirm={() => deleteOrder(confirmDelete)} onCancel={() => setConfirmDelete(null)} danger />}
 
+      {/* Period Filter */}
+      <div style={{ ...CARD, padding: "14px 18px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a2a5e", marginRight: 4 }}>📅 Periode:</span>
+          {PERIODS.map(p => (
+            <button key={p.id} onClick={() => setPeriod(p.id)} className="tap-btn" style={{
+              padding: "6px 14px", borderRadius: 20, border: `2px solid ${period === p.id ? "#2d4ba0" : "#d0e5f5"}`,
+              background: period === p.id ? "#e4f3fd" : "#fff",
+              color: period === p.id ? "#2d4ba0" : "#7a8ab0",
+              fontWeight: period === p.id ? 700 : 500, cursor: "pointer", fontSize: 12,
+            }}>{p.label}</button>
+          ))}
+          {period === "custom" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: isMobile ? 8 : 0, width: isMobile ? "100%" : "auto" }}>
+              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+                style={{ padding: "6px 10px", border: "1.5px solid #d0e5f5", borderRadius: 8, fontSize: 13 }} />
+              <span style={{ color: "#7a8ab0", fontSize: 13 }}>s/d</span>
+              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+                style={{ padding: "6px 10px", border: "1.5px solid #d0e5f5", borderRadius: 8, fontSize: 13 }} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
         {statCards.map(s => (
           <div key={s.label} style={{ ...CARD, padding: isMobile ? "12px 14px" : "18px 20px", borderTop: `4px solid ${s.accent}` }}>
             <div style={{ fontSize: isMobile ? 11 : 12, color: "#7a8ab0", marginBottom: 5, fontWeight: 600 }}>{s.icon} {s.label}</div>
-            <div style={{ fontSize: isMobile ? 16 : 21, fontWeight: 800, color: s.accent }}>{s.value}</div>
+            <div style={{ fontSize: isMobile ? 15 : 20, fontWeight: 800, color: s.accent }}>{s.value}</div>
           </div>
         ))}
       </div>
@@ -942,11 +996,11 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
       {isMobile ? (
         <>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#1a2a5e" }}>📊 Riwayat Penjualan</div>
-          {orders.length === 0 ? (
-            <div style={{ ...CARD, padding: 40, textAlign: "center", color: "#7a8ab0" }}><div style={{ fontSize: 36 }}>📊</div>Belum ada penjualan</div>
+          {filteredOrders.length === 0 ? (
+            <div style={{ ...CARD, padding: 40, textAlign: "center", color: "#7a8ab0" }}><div style={{ fontSize: 36 }}>📊</div>Belum ada penjualan di periode ini</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {orders.map(o => (
+              {filteredOrders.map(o => (
                 <div key={o.id} onClick={() => openDetail(o)} className="tap-btn" style={{ ...CARD, padding: 14, cursor: "pointer" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>{o.order_no}</div>
@@ -969,11 +1023,10 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
             </div>
           )}
 
-          {/* Mobile detail bottom sheet */}
           {detail && (
             <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
               <div onClick={() => setDetail(null)} style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} />
-              <div style={{ background: "#fadeeb", borderRadius: "20px 20px 0 0", padding: 20, maxHeight: "80vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+              <div style={{ background: "#fdf4fb", borderRadius: "20px 20px 0 0", padding: 20, maxHeight: "80vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
                 <div style={{ width: 36, height: 4, background: "#d4c8e0", borderRadius: 2, margin: "0 auto 16px" }} />
                 <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} />
               </div>
@@ -983,9 +1036,12 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: detail ? "1fr 370px" : "1fr", gap: 20 }}>
           <div style={{ ...CARD, overflow: "hidden" }}>
-            <div style={{ padding: "14px 18px", borderBottom: "2px solid #d4c8e0", fontWeight: 800, fontSize: 15, background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>📊 Riwayat Penjualan</div>
-            {orders.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "60px 0", color: "#7a8ab0" }}><div style={{ fontSize: 36 }}>📊</div>Belum ada penjualan</div>
+            <div style={{ padding: "14px 18px", borderBottom: "2px solid #d4c8e0", fontWeight: 800, fontSize: 15, background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
+              📊 Riwayat Penjualan
+              <span style={{ fontSize: 12, fontWeight: 500, color: "#7a8ab0", marginLeft: 8 }}>({filteredOrders.length} transaksi)</span>
+            </div>
+            {filteredOrders.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "60px 0", color: "#7a8ab0" }}><div style={{ fontSize: 36 }}>📊</div>Belum ada penjualan di periode ini</div>
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -996,8 +1052,8 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map(o => (
-                    <tr key={o.id} onClick={() => openDetail(o)} style={{ borderBottom: "1px solid #d4c8e0", cursor: "pointer", background: detail?.id === o.id ? "#fde8f0" : "transparent" }}>
+                  {filteredOrders.map(o => (
+                    <tr key={o.id} onClick={() => openDetail(o)} style={{ borderBottom: "1px solid #d4c8e0", cursor: "pointer", background: detail?.id === o.id ? "#e4f3fd" : "transparent" }}>
                       <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "#ee4181" }}>{o.order_no}</td>
                       <td style={{ padding: "10px 14px", fontSize: 12, color: "#7a8ab0" }}>{formatDate(o.created_at)}</td>
                       <td style={{ padding: "10px 14px", fontSize: 13 }}>{o.customer_name || "Umum"}</td>
