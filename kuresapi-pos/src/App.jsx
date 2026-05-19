@@ -1293,12 +1293,28 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmBulk, setConfirmBulk] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [selected, setSelected] = useState(new Set());
   const fileInputRef = useRef(null);
   const [form, setForm] = useState({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" });
 
   const openNew = () => { setForm({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (r) => { setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "" }); setEditing(r.id); setShowForm(true); };
+
+  const toggleSelect = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map(r => r.id)));
+  };
+  const bulkDelete = async () => {
+    let ok = 0;
+    for (const id of selected) {
+      try { await api(`kr_reimbursements?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }); ok++; } catch {}
+    }
+    setSelected(new Set()); setConfirmBulk(false); onRefresh();
+    showToast(`🗑️ ${ok} item dihapus!`);
+  };
 
   // ── EXPORT ────────────────────────────────────────────────────────────────
   const exportCSV = () => {
@@ -1486,6 +1502,16 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   return (
     <div>
       {confirmDelete && <ConfirmModal title="Hapus Reimbursement?" message={`Hapus "${confirmDelete.expense_details}" (${formatRp(confirmDelete.amount)}) secara permanen?`} onConfirm={() => deleteItem(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmBulk && <ConfirmModal title={`Hapus ${selected.size} Item?`} message={`Hapus ${selected.size} reimbursement yang dipilih secara permanen?`} onConfirm={bulkDelete} onCancel={() => setConfirmBulk(false)} />}
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div style={{ ...CARD, padding: "10px 16px", marginBottom: 12, background: "#fde8f0", border: "1.5px solid #f5a8c4", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>✓ {selected.size} item dipilih</span>
+          <button onClick={() => setConfirmBulk(true)} className="tap-btn" style={{ padding: "6px 14px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🗑️ Hapus Terpilih</button>
+          <button onClick={() => setSelected(new Set())} className="tap-btn" style={{ padding: "6px 12px", background: "#fff", color: "#7a8ab0", border: "1.5px solid #d0e5f5", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Batal</button>
+        </div>
+      )}
 
       {/* Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
@@ -1532,62 +1558,80 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
         </div>
       ) : isMobile ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filtered.map(r => (
-            <div key={r.id} style={{ ...CARD, padding: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#1a2a5e", marginBottom: 2 }}>{r.expense_details}</div>
-                  <div style={{ fontSize: 12, color: "#7a8ab0" }}>{r.event || "—"} {r.pic ? `· ${r.pic}` : ""}</div>
+          {filtered.map(r => {
+            const isSel = selected.has(r.id);
+            return (
+              <div key={r.id} style={{ ...CARD, padding: 14, border: `1.5px solid ${isSel ? "#ee4181" : "#d0e5f5"}`, background: isSel ? "#fde8f0" : "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: 1, minWidth: 0 }}>
+                    <input type="checkbox" checked={isSel} onChange={() => toggleSelect(r.id)}
+                      style={{ width: 18, height: 18, marginTop: 2, accentColor: "#ee4181", cursor: "pointer", flexShrink: 0 }} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1a2a5e", marginBottom: 2 }}>{r.expense_details}</div>
+                      <div style={{ fontSize: 12, color: "#7a8ab0" }}>{r.event || "—"} {r.pic ? `· ${r.pic}` : ""}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#ee4181", marginLeft: 10, flexShrink: 0 }}>{formatRp(r.amount)}</div>
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 800, color: "#ee4181", marginLeft: 10, flexShrink: 0 }}>{formatRp(r.amount)}</div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
-                  padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
-                  background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
-                  color: r.status === "paid" ? "#10b981" : "#f59e0b",
-                }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
-                  <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
+                    padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
+                    background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
+                    color: r.status === "paid" ? "#10b981" : "#f59e0b",
+                  }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
+                    <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div style={{ ...CARD, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
+                <th style={{ padding: "11px 14px", width: 40 }}>
+                  <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleSelectAll}
+                    style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+                </th>
                 {["Detail Pengeluaran","Event","PIC","Jumlah","Tanggal","Status","Aksi"].map(h => (
                   <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d0e5f5" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => (
-                <tr key={r.id} style={{ borderBottom: "1px solid #d0e5f5" }}>
-                  <td style={{ padding: "11px 14px", fontSize: 13, fontWeight: 600, color: "#1a2a5e", maxWidth: 240 }}>{r.expense_details}</td>
-                  <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.event || "—"}</td>
-                  <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.pic || "—"}</td>
-                  <td style={{ padding: "11px 14px", fontSize: 14, fontWeight: 700, color: "#ee4181" }}>{formatRp(r.amount)}</td>
-                  <td style={{ padding: "11px 14px", fontSize: 12, color: "#7a8ab0" }}>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" }) : "—"}</td>
-                  <td style={{ padding: "11px 14px" }}>
-                    <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
-                      padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
-                      background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
-                      color: r.status === "paid" ? "#10b981" : "#f59e0b",
-                    }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
-                  </td>
-                  <td style={{ padding: "11px 14px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
-                      <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(r => {
+                const isSel = selected.has(r.id);
+                return (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #d0e5f5", background: isSel ? "#fde8f0" : "transparent" }}>
+                    <td style={{ padding: "11px 14px" }}>
+                      <input type="checkbox" checked={isSel} onChange={() => toggleSelect(r.id)}
+                        style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+                    </td>
+                    <td style={{ padding: "11px 14px", fontSize: 13, fontWeight: 600, color: "#1a2a5e", maxWidth: 240 }}>{r.expense_details}</td>
+                    <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.event || "—"}</td>
+                    <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.pic || "—"}</td>
+                    <td style={{ padding: "11px 14px", fontSize: 14, fontWeight: 700, color: "#ee4181" }}>{formatRp(r.amount)}</td>
+                    <td style={{ padding: "11px 14px", fontSize: 12, color: "#7a8ab0" }}>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" }) : "—"}</td>
+                    <td style={{ padding: "11px 14px" }}>
+                      <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
+                        padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
+                        background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
+                        color: r.status === "paid" ? "#10b981" : "#f59e0b",
+                      }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
+                    </td>
+                    <td style={{ padding: "11px 14px" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
+                        <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
