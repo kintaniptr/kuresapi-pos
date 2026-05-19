@@ -52,6 +52,18 @@ const api = async (path, opts = {}) => {
 };
 
 const SETUP_SQL = `
+create table if not exists kr_events (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text check (type in ('art_market','workshop','online','other')) default 'other',
+  location text,
+  start_date date,
+  end_date date,
+  status text check (status in ('upcoming','ongoing','done')) default 'upcoming',
+  notes text,
+  created_at timestamptz default now()
+);
+alter table kr_events disable row level security;
 create table if not exists kr_items (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -74,6 +86,7 @@ create table if not exists kr_orders (
   payment_method text check (payment_method in ('cash','qris')),
   subtotal numeric(12,2), discount numeric(12,2) default 0, total numeric(12,2),
   status text default 'paid' check (status in ('paid','pending','cancelled')),
+  event_id uuid,
   notes text, created_at timestamptz default now(), created_by text
 );
 create table if not exists kr_order_items (
@@ -92,7 +105,8 @@ create table if not exists kr_reimbursements (
   transaction_date date,
   notes text,
   created_at timestamptz default now()
-);`;
+);
+alter table kr_reimbursements disable row level security;`;
 
 const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
 const formatDate = (d) => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -112,6 +126,8 @@ const TABS = [
   { id: "inventory", icon: "📦", label: "Inventory",     roles: ["Admin","Kasir"] },
   { id: "stock",     icon: "↕️", label: "Stok",          roles: ["Admin","Kasir"] },
   { id: "sales",     icon: "📊", label: "Penjualan",     roles: ["Admin","Kasir"] },
+  { id: "events",    icon: "🎪", label: "Events",        roles: ["Admin"] },
+  { id: "laporan",   icon: "📈", label: "Laporan",       roles: ["Admin"] },
   { id: "reimburse", icon: "💸", label: "Reimbursement", roles: ["Admin"] },
   { id: "setup",     icon: "⚙️", label: "Setup",         roles: ["Admin"] },
 ];
@@ -122,6 +138,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [moves, setMoves] = useState([]);
   const [reimburses, setReimburses] = useState([]);
+  const [events, setEvents] = useState([]);
   const [toast, setToast] = useState(null);
   const [user, setUser] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem("kr_user")) || null; } catch { return null; }
@@ -156,8 +173,11 @@ export default function App() {
   const loadReimburses = useCallback(async () => {
     try { setReimburses(await api("kr_reimbursements?order=created_at.desc")); } catch {}
   }, []);
+  const loadEvents = useCallback(async () => {
+    try { setEvents(await api("kr_events?order=start_date.desc")); } catch {}
+  }, []);
 
-  useEffect(() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); }, []);
+  useEffect(() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); loadEvents(); }, []);
 
   // Tampilkan login screen kalau belum login
   if (!user) return <LoginScreen onLogin={handleLogin} isMobile={isMobile} />;
@@ -215,12 +235,14 @@ export default function App() {
 
       {/* ── Content ── */}
       <div style={{ padding: isMobile ? "16px" : "28px", maxWidth: 1320, margin: "0 auto" }}>
-        {tab === "pos"       && <POS items={items} onRefresh={() => { loadItems(); loadOrders(); }} showToast={showToast} isMobile={isMobile} />}
+        {tab === "pos"       && <POS items={items} events={events} onRefresh={() => { loadItems(); loadOrders(); }} showToast={showToast} isMobile={isMobile} />}
         {tab === "inventory" && <Inventory items={items} onRefresh={loadItems} showToast={showToast} isMobile={isMobile} />}
         {tab === "stock"     && <StockMoves items={items} moves={moves} onRefresh={() => { loadItems(); loadMoves(); }} showToast={showToast} isMobile={isMobile} />}
-        {tab === "sales"     && <Sales orders={orders} items={items} onRefresh={loadOrders} showToast={showToast} isMobile={isMobile} />}
+        {tab === "sales"     && <Sales orders={orders} items={items} events={events} onRefresh={loadOrders} showToast={showToast} isMobile={isMobile} />}
+        {tab === "events"    && <Events events={events} onRefresh={loadEvents} showToast={showToast} isMobile={isMobile} />}
+        {tab === "laporan"   && <Laporan orders={orders} orderItems={[]} events={events} reimburses={reimburses} items={items} isMobile={isMobile} />}
         {tab === "reimburse" && <Reimbursement reimburses={reimburses} onRefresh={loadReimburses} showToast={showToast} isMobile={isMobile} />}
-        {tab === "setup"     && user.role === "Admin" && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); }} />}
+        {tab === "setup"     && user.role === "Admin" && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); loadEvents(); }} />}
         {tab === "setup"     && user.role !== "Admin" && (
           <div style={{ textAlign: "center", padding: "80px 0", color: "#7a8ab0" }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>🔒</div>
@@ -345,7 +367,7 @@ function LoginScreen({ onLogin, isMobile }) {
 }
 
 // ─── POS ──────────────────────────────────────────────────────────────────────
-function POS({ items, onRefresh, showToast, isMobile }) {
+function POS({ items, events, onRefresh, showToast, isMobile }) {
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -353,9 +375,12 @@ function POS({ items, onRefresh, showToast, isMobile }) {
   const [customer, setCustomer] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [discount, setDiscount] = useState(0);
+  const [selectedEvent, setSelectedEvent] = useState("");
   const [saving, setSaving] = useState(false);
   const [invoice, setInvoice] = useState(null);
   const [showCart, setShowCart] = useState(false);
+
+  const activeEvents = (events || []).filter(e => e.status === "ongoing" || e.status === "upcoming");
 
   const filtered = items.filter(i =>
     (typeFilter === "all" || i.type === typeFilter) &&
@@ -386,7 +411,7 @@ function POS({ items, onRefresh, showToast, isMobile }) {
       const orderNo = genOrderNo();
       const [order] = await api("kr_orders", {
         method: "POST",
-        body: JSON.stringify({ order_no: orderNo, customer_name: customer || "Umum", customer_phone: customerPhone, payment_method: payment, subtotal, discount, total, status: "paid" }),
+        body: JSON.stringify({ order_no: orderNo, customer_name: customer || "Umum", customer_phone: customerPhone, payment_method: payment, subtotal, discount, total, status: "paid", event_id: selectedEvent || null }),
       });
       await api("kr_order_items", { method: "POST", body: JSON.stringify(cart.map(x => ({ order_id: order.id, item_id: x.id, item_name: x.name, qty: x.qty, price: x.price, subtotal: x.price * x.qty }))), prefer: "return=minimal" });
       const stockItems = cart.filter(x => x.type !== "workshop");
@@ -398,7 +423,7 @@ function POS({ items, onRefresh, showToast, isMobile }) {
         }
       }
       setInvoice({ ...order, items: cart, customer, customerPhone, payment, subtotal, discount, total });
-      setCart([]); setCustomer(""); setCustomerPhone(""); setDiscount(0); setShowCart(false);
+      setCart([]); setCustomer(""); setCustomerPhone(""); setDiscount(0); setSelectedEvent(""); setShowCart(false);
       onRefresh();
       showToast(`✨ Transaksi ${orderNo} berhasil!`);
     } catch (e) { showToast("Gagal: " + e.message, "error"); }
@@ -416,6 +441,11 @@ function POS({ items, onRefresh, showToast, isMobile }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
         <input placeholder="👤 Nama customer" value={customer} onChange={e => setCustomer(e.target.value)} style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 14 }} />
         <input placeholder="📱 No. HP" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} style={{ width: "100%", padding: "9px 13px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 14 }} />
+        <select value={selectedEvent} onChange={e => setSelectedEvent(e.target.value)}
+          style={{ width: "100%", padding: "9px 13px", border: `1.5px solid ${selectedEvent ? "#a1def9" : "#d4c8e0"}`, borderRadius: 10, fontSize: 14, background: selectedEvent ? "#e4f3fd" : "#fff", color: selectedEvent ? "#2d4ba0" : "#7a8ab0" }}>
+          <option value="">🎪 Pilih event (opsional)</option>
+          {activeEvents.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
       </div>
       {cart.length === 0 ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "#7a8ab0", fontSize: 13 }}>
@@ -1635,6 +1665,301 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EVENTS ───────────────────────────────────────────────────────────────────
+const EVENT_TYPES = { art_market: { label: "🛍️ Art Market", color: "#2d4ba0", bg: "#e4f3fd" }, workshop: { label: "🎨 Workshop", color: "#ee4181", bg: "#fde8f0" }, online: { label: "🌐 Online", color: "#10b981", bg: "#d1fae5" }, other: { label: "📌 Lainnya", color: "#7a8ab0", bg: "#f0f0f0" } };
+const EVENT_STATUS = { upcoming: { label: "⏳ Upcoming", color: "#f59e0b", bg: "#fef3c7" }, ongoing: { label: "🟢 Ongoing", color: "#10b981", bg: "#d1fae5" }, done: { label: "✅ Selesai", color: "#7a8ab0", bg: "#f0f0f0" } };
+
+function Events({ events, onRefresh, showToast, isMobile }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [form, setForm] = useState({ name: "", type: "art_market", location: "", start_date: "", end_date: "", status: "upcoming", notes: "" });
+
+  const openNew = () => { setForm({ name: "", type: "art_market", location: "", start_date: "", end_date: "", status: "upcoming", notes: "" }); setEditing(null); setShowForm(true); };
+  const openEdit = (e) => { setForm({ ...e, start_date: e.start_date||"", end_date: e.end_date||"" }); setEditing(e.id); setShowForm(true); };
+
+  const save = async () => {
+    if (!form.name.trim()) return showToast("Nama event wajib diisi", "error");
+    try {
+      const payload = { ...form, start_date: form.start_date||null, end_date: form.end_date||null };
+      if (editing) {
+        await api(`kr_events?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
+        showToast("✅ Event diperbarui!");
+      } else {
+        await api("kr_events", { method: "POST", body: JSON.stringify(payload), prefer: "return=minimal" });
+        showToast("✨ Event ditambahkan!");
+      }
+      setShowForm(false); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const deleteEvent = async (ev) => {
+    try {
+      await api(`kr_events?id=eq.${ev.id}`, { method: "DELETE", prefer: "return=minimal" });
+      showToast("🗑️ Event dihapus!"); setConfirmDelete(null); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const setStatus = async (ev, status) => {
+    try {
+      await api(`kr_events?id=eq.${ev.id}`, { method: "PATCH", body: JSON.stringify({ status }), prefer: "return=minimal" });
+      showToast(`Status diubah ke ${EVENT_STATUS[status].label}`); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  if (showForm) return (
+    <div style={{ maxWidth: 540 }}>
+      <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 18, color: "#1a2a5e" }}>{editing ? "✏️ Edit Event" : "✨ Tambah Event"}</div>
+      <div style={{ ...CARD, padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 7, fontWeight: 600 }}>Tipe *</label>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            {Object.entries(EVENT_TYPES).map(([v, t]) => (
+              <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} className="tap-btn" style={{ padding: "8px 14px", border: `2px solid ${form.type === v ? t.color : "#d0e5f5"}`, borderRadius: 10, background: form.type === v ? t.bg : "#fff", color: form.type === v ? t.color : "#7a8ab0", fontWeight: form.type === v ? 700 : 500, cursor: "pointer", fontSize: 12 }}>{t.label}</button>
+            ))}
+          </div>
+        </div>
+        {[["name","Nama Event *","text","Contoh: Tomoland Vol 4"],["location","Lokasi","text","Kota / Venue"],["notes","Catatan","text","Opsional"]].map(([k,l,t,ph]) => (
+          <div key={k}>
+            <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>{l}</label>
+            <input type={t} placeholder={ph} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+              style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+        ))}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {[["start_date","Tanggal Mulai"],["end_date","Tanggal Selesai"]].map(([k,l]) => (
+            <div key={k}>
+              <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>{l}</label>
+              <input type="date" value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+                style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+          ))}
+        </div>
+        <div>
+          <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 7, fontWeight: 600 }}>Status</label>
+          <div style={{ display: "flex", gap: 7 }}>
+            {Object.entries(EVENT_STATUS).map(([v, s]) => (
+              <button key={v} onClick={() => setForm(f => ({ ...f, status: v }))} className="tap-btn" style={{ flex: 1, padding: "8px 0", border: `2px solid ${form.status === v ? s.color : "#d0e5f5"}`, borderRadius: 10, background: form.status === v ? s.bg : "#fff", color: form.status === v ? s.color : "#7a8ab0", fontWeight: form.status === v ? 700 : 500, cursor: "pointer", fontSize: 12 }}>{s.label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={save} className="tap-btn" style={{ flex: 1, padding: "13px 0", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 14 }}>{editing ? "💾 Simpan" : "✨ Tambah"}</button>
+          <button onClick={() => setShowForm(false)} className="tap-btn" style={{ flex: 1, padding: "13px 0", background: "#fff", color: "#1a2a5e", border: "1.5px solid #d0e5f5", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 14 }}>Batal</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      {confirmDelete && <ConfirmModal title="Hapus Event?" message={`Hapus event "${confirmDelete.name}" secara permanen?`} onConfirm={() => deleteEvent(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ fontWeight: 800, fontSize: 18, color: "#1a2a5e" }}>🎪 Master Event</div>
+        <button onClick={openNew} className="tap-btn" style={{ padding: "10px 18px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Tambah Event</button>
+      </div>
+      {events.length === 0 ? (
+        <div style={{ ...CARD, padding: 60, textAlign: "center", color: "#7a8ab0" }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>🎪</div>
+          <div style={{ fontWeight: 600 }}>Belum ada event</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>Tambah event pertama untuk mulai tracking laporan</div>
+          <button onClick={openNew} className="tap-btn" style={{ marginTop: 16, padding: "10px 22px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer" }}>Tambah Sekarang</button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
+          {events.map(ev => {
+            const t = EVENT_TYPES[ev.type] || EVENT_TYPES.other;
+            const s = EVENT_STATUS[ev.status] || EVENT_STATUS.upcoming;
+            return (
+              <div key={ev.id} style={{ ...CARD, padding: 18 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1a2a5e", marginBottom: 4 }}>{ev.name}</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 20, background: t.bg, color: t.color, fontWeight: 700 }}>{t.label}</span>
+                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 20, background: s.bg, color: s.color, fontWeight: 700 }}>{s.label}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => openEdit(ev)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
+                    <button onClick={() => setConfirmDelete(ev)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                  </div>
+                </div>
+                {ev.location && <div style={{ fontSize: 12, color: "#7a8ab0", marginBottom: 6 }}>📍 {ev.location}</div>}
+                {(ev.start_date || ev.end_date) && (
+                  <div style={{ fontSize: 12, color: "#7a8ab0", marginBottom: 10 }}>
+                    📅 {ev.start_date ? new Date(ev.start_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" }) : "—"}
+                    {ev.end_date && ev.end_date !== ev.start_date ? ` – ${new Date(ev.end_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" })}` : ""}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 6, borderTop: "1px solid #d0e5f5", paddingTop: 10 }}>
+                  {Object.entries(EVENT_STATUS).filter(([v]) => v !== ev.status).map(([v, st]) => (
+                    <button key={v} onClick={() => setStatus(ev, v)} className="tap-btn" style={{ flex: 1, padding: "5px 0", border: `1.5px solid ${st.color}`, borderRadius: 8, background: "#fff", color: st.color, fontWeight: 600, cursor: "pointer", fontSize: 11 }}>{st.label}</button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LAPORAN ──────────────────────────────────────────────────────────────────
+function Laporan({ orders, events, reimburses, items, isMobile }) {
+  const [selectedEvent, setSelectedEvent] = useState(null);
+
+  const eventMap = Object.fromEntries((events||[]).map(e => [e.id, e]));
+  const EVENT_TYPES_L = { art_market: "🛍️ Art Market", workshop: "🎨 Workshop", online: "🌐 Online", other: "📌 Lainnya" };
+
+  // Group orders by event
+  const eventStats = (events||[]).map(ev => {
+    const evOrders = orders.filter(o => o.event_id === ev.id && o.status === "paid");
+    const omzet = evOrders.reduce((s, o) => s + (o.total||0), 0);
+    const evReimburse = reimburses.filter(r => {
+      const name = (r.event||"").toLowerCase();
+      return name.includes(ev.name.toLowerCase().split(" ")[0]);
+    }).reduce((s, r) => s + (r.amount||0), 0);
+    const profit = omzet - evReimburse;
+    const margin = omzet > 0 ? Math.round((profit / omzet) * 100) : 0;
+    return { ev, omzet, reimburse: evReimburse, profit, margin, txCount: evOrders.length, orders: evOrders };
+  }).filter(s => s.omzet > 0 || s.ev.status !== "upcoming");
+
+  // Non-event orders
+  const noEventOrders = orders.filter(o => !o.event_id && o.status === "paid");
+  const noEventOmzet = noEventOrders.reduce((s, o) => s + (o.total||0), 0);
+
+  const totalOmzet = eventStats.reduce((s, e) => s + e.omzet, 0) + noEventOmzet;
+  const totalReimburse = reimburses.filter(r => r.status === "unpaid").reduce((s, r) => s + (r.amount||0), 0);
+  const totalProfit = eventStats.reduce((s, e) => s + e.profit, 0);
+
+  // Top items for selected event
+  const getTopItems = async (evId) => {};
+
+  const maxOmzet = Math.max(...eventStats.map(e => e.omzet), 1);
+
+  return (
+    <div>
+      {/* Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: isMobile ? 10 : 14, marginBottom: 20 }}>
+        {[
+          { label: "Total Omzet", value: formatRp(totalOmzet), icon: "📈", accent: "#ee4181" },
+          { label: "Total Reimburse", value: formatRp(totalReimburse), icon: "💸", accent: "#f59e0b" },
+          { label: "Estimasi Profit", value: formatRp(totalProfit), icon: "✨", accent: "#10b981" },
+          { label: "Total Event", value: `${eventStats.length} event`, icon: "🎪", accent: "#2d4ba0" },
+        ].map(s => (
+          <div key={s.label} style={{ ...CARD, padding: isMobile ? "12px 14px" : "16px 18px", borderTop: `4px solid ${s.accent}` }}>
+            <div style={{ fontSize: 11, color: "#7a8ab0", marginBottom: 5, fontWeight: 600 }}>{s.icon} {s.label}</div>
+            <div style={{ fontSize: isMobile ? 15 : 19, fontWeight: 800, color: s.accent }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {eventStats.length === 0 ? (
+        <div style={{ ...CARD, padding: 60, textAlign: "center", color: "#7a8ab0" }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>📈</div>
+          <div style={{ fontWeight: 600 }}>Belum ada data laporan</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>Tambah event di tab Events, lalu pilih event saat transaksi di Kasir</div>
+        </div>
+      ) : (
+        <>
+          {/* Bar chart */}
+          <div style={{ ...CARD, padding: 18, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#1a2a5e" }}>Perbandingan omzet vs profit</div>
+              <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#7a8ab0" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#ee4181", display: "inline-block" }}></span>Omzet</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#10b981", display: "inline-block" }}></span>Profit</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 120, paddingBottom: 24, position: "relative" }}>
+              {eventStats.map(({ ev, omzet, profit }) => {
+                const h = Math.round((omzet / maxOmzet) * 90);
+                const ph = omzet > 0 ? Math.max(2, Math.round((profit / omzet) * h)) : 0;
+                return (
+                  <div key={ev.id} onClick={() => setSelectedEvent(selectedEvent?.ev.id === ev.id ? null : { ev, omzet, profit, reimburse: eventStats.find(e=>e.ev.id===ev.id)?.reimburse||0, txCount: eventStats.find(e=>e.ev.id===ev.id)?.txCount||0, margin: eventStats.find(e=>e.ev.id===ev.id)?.margin||0 })}
+                    style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", gap: 3, cursor: "pointer" }}>
+                    <div style={{ fontSize: 10, color: "#1a2a5e", fontWeight: 600 }}>{formatRp(omzet).replace("Rp\xa0","").replace(".000","rb")}</div>
+                    <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", justifyContent: "center" }}>
+                      <div style={{ width: "44%", height: h, background: selectedEvent?.ev?.id === ev.id ? "#c0185a" : "#ee4181", borderRadius: "3px 3px 0 0", transition: "all 0.2s" }}></div>
+                      <div style={{ width: "44%", height: ph, background: selectedEvent?.ev?.id === ev.id ? "#0a9060" : "#10b981", borderRadius: "3px 3px 0 0", transition: "all 0.2s" }}></div>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#7a8ab0", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.name.split(" ").slice(0,2).join(" ")}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Event cards + detail */}
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : selectedEvent ? "1fr 320px" : "1fr", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px,1fr))", gap: 12 }}>
+              {eventStats.map(({ ev, omzet, profit, reimburse, margin, txCount }) => {
+                const t = EVENT_TYPES_L[ev.type] || "📌";
+                const isSelected = selectedEvent?.ev?.id === ev.id;
+                return (
+                  <div key={ev.id} onClick={() => setSelectedEvent(isSelected ? null : { ev, omzet, profit, reimburse, txCount, margin })}
+                    style={{ ...CARD, padding: 16, cursor: "pointer", border: `${isSelected ? "2px" : "1.5px"} solid ${isSelected ? "#2d4ba0" : "#d0e5f5"}`, background: isSelected ? "#e4f3fd" : "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#1a2a5e" }}>{ev.name}</div>
+                        <div style={{ fontSize: 11, color: "#7a8ab0", marginTop: 2 }}>{t} · {ev.start_date ? new Date(ev.start_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" }) : "—"}</div>
+                      </div>
+                      <div style={{ fontSize: 12, padding: "3px 8px", borderRadius: 20, background: margin >= 60 ? "#d1fae5" : margin >= 40 ? "#fef3c7" : "#fee2e2", color: margin >= 60 ? "#10b981" : margin >= 40 ? "#f59e0b" : "#ef4444", fontWeight: 700 }}>
+                        {margin}% margin
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 10 }}>
+                      <div><div style={{ fontSize: 10, color: "#7a8ab0" }}>Omzet</div><div style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>{formatRp(omzet)}</div></div>
+                      <div><div style={{ fontSize: 10, color: "#7a8ab0" }}>Profit</div><div style={{ fontSize: 13, fontWeight: 700, color: "#10b981" }}>{formatRp(profit)}</div></div>
+                      <div><div style={{ fontSize: 10, color: "#7a8ab0" }}>Transaksi</div><div style={{ fontSize: 13, fontWeight: 700, color: "#1a2a5e" }}>{txCount}</div></div>
+                    </div>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#7a8ab0", marginBottom: 3 }}>
+                        <span>Margin profit</span><span style={{ color: "#1a2a5e", fontWeight: 600 }}>{margin}%</span>
+                      </div>
+                      <div style={{ height: 5, background: "#f0f0f0", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${margin}%`, background: margin >= 60 ? "#10b981" : margin >= 40 ? "#f59e0b" : "#ef4444", borderRadius: 3, transition: "width 0.5s" }}></div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Detail panel */}
+            {selectedEvent && (
+              <div style={{ ...CARD, padding: 18, height: "fit-content", position: isMobile ? "relative" : "sticky", top: 100 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1a2a5e" }}>{selectedEvent.ev.name}</div>
+                  <button onClick={() => setSelectedEvent(null)} style={{ background: "#fde8f0", border: "none", cursor: "pointer", color: "#ee4181", borderRadius: 8, width: 28, height: 28, fontSize: 16 }}>×</button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+                  {[
+                    { label: "Omzet kotor", value: formatRp(selectedEvent.omzet), color: "#ee4181" },
+                    { label: "Reimbursement", value: formatRp(selectedEvent.reimburse), color: "#f59e0b" },
+                    { label: "Profit bersih", value: formatRp(selectedEvent.profit), color: "#10b981" },
+                    { label: "Transaksi", value: selectedEvent.txCount, color: "#2d4ba0" },
+                  ].map(s => (
+                    <div key={s.label} style={{ background: "#f8f8f8", borderRadius: 10, padding: "10px 12px" }}>
+                      <div style={{ fontSize: 10, color: "#7a8ab0", marginBottom: 3 }}>{s.label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: s.color }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: "#7a8ab0", textAlign: "center", padding: "10px 0", borderTop: "1px dashed #d0e5f5" }}>
+                  Klik event lain untuk lihat detailnya
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
