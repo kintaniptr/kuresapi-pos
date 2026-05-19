@@ -1520,7 +1520,8 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
           <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13 }}>
             {importing ? "⏳..." : "📤 Import"}
           </button>
-        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} style={{ display: "none" }} />
+          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} style={{ display: "none" }} />
+        </div>
       </div>
 
       {/* List */}
