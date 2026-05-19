@@ -613,17 +613,18 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
   const [filter, setFilter] = useState("all");
   const [form, setForm] = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" });
   const [importing, setImporting] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
   const fileInputRef = useRef(null);
 
   const openNew = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (item) => { setForm({ ...item, price: item.price || "", cost: item.cost || "", stock: item.stock || "" }); setEditing(item.id); setShowForm(true); };
 
-  // ── EXPORT ke Excel ──────────────────────────────────────────────────────
-  // ── EXPORT ke CSV ────────────────────────────────────────────────────────
+  // ── EXPORT ke CSV (Harga Modal dulu, baru Harga Jual) ────────────────────
   const exportExcel = () => {
-    const headers = ["Nama","Tipe","SKU","Harga Jual","Harga Modal","Stok","Satuan","Keterangan"];
+    const headers = ["Nama","Tipe","SKU","Harga Modal","Harga Jual","Stok","Satuan","Keterangan"];
     const rows = items.map(i => [
-      i.name, i.type, i.sku||"", i.price, i.cost, i.stock, i.unit, i.description||""
+      i.name, i.type, i.sku||"", i.cost, i.price, i.stock, i.unit, i.description||""
     ]);
     const csv = [headers, ...rows]
       .map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(","))
@@ -634,6 +635,21 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     a.download = `KURESAPI_Inventory_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     showToast("📥 Export CSV berhasil!");
+  };
+
+  // ── BULK DELETE ───────────────────────────────────────────────────────────
+  const toggleSelect = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map(i => i.id)));
+  };
+  const bulkDelete = async () => {
+    let ok = 0;
+    for (const id of selected) {
+      try { await api(`kr_items?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }); ok++; } catch {}
+    }
+    setSelected(new Set()); setConfirmBulk(false); onRefresh();
+    showToast(`🗑️ ${ok} item dihapus!`);
   };
 
   // ── IMPORT dari CSV ───────────────────────────────────────────────────────
@@ -773,8 +789,17 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
 
   return (
     <div>
-      {/* Confirm Delete Modal */}
       {confirmDelete && <ConfirmModal title="Hapus Item?" message={`Hapus "${confirmDelete.name}" secara permanen dari database?`} onConfirm={() => deleteItem(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmBulk && <ConfirmModal title={`Hapus ${selected.size} Item?`} message={`Hapus ${selected.size} item yang dipilih secara permanen dari database?`} onConfirm={bulkDelete} onCancel={() => setConfirmBulk(false)} />}
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div style={{ ...CARD, padding: "10px 16px", marginBottom: 12, background: "#fde8f0", border: "1.5px solid #f5a8c4", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>✓ {selected.size} item dipilih</span>
+          <button onClick={() => setConfirmBulk(true)} className="tap-btn" style={{ padding: "6px 14px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🗑️ Hapus Terpilih</button>
+          <button onClick={() => setSelected(new Set())} className="tap-btn" style={{ padding: "6px 12px", background: "#fff", color: "#7a8ab0", border: "1.5px solid #d4c8e0", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Batal</button>
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10 }}>
         <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, flex: 1 }}>
@@ -787,7 +812,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
         <button onClick={openNew} className="tap-btn" style={{ padding: "9px 14px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>+ Tambah</button>
         <button onClick={exportExcel} className="tap-btn" style={{ padding: "9px 14px", background: "#e4f3fd", color: "#2d4ba0", border: "1.5px solid #a1def9", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>📥 Export</button>
         <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13, flexShrink: 0 }}>
-          {importing ? "⏳ Import..." : "📤 Import Excel"}
+          {importing ? "⏳ Import..." : "📤 Import CSV"}
         </button>
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{ display: "none" }} />
       </div>
@@ -803,12 +828,17 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {filtered.map(item => {
             const c = ITEM_COLORS[item.type];
+            const isSelected = selected.has(item.id);
             return (
-              <div key={item.id} style={{ ...CARD, padding: 14 }}>
+              <div key={item.id} style={{ ...CARD, padding: 14, border: `1.5px solid ${isSelected ? "#ee4181" : "#d0e5f5"}`, background: isSelected ? "#fde8f0" : "#fff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1a2a5e", marginBottom: 4 }}>{item.name}</div>
-                    <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</span>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: 1 }}>
+                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(item.id)}
+                      style={{ width: 18, height: 18, marginTop: 2, accentColor: "#ee4181", cursor: "pointer", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#1a2a5e", marginBottom: 4 }}>{item.name}</div>
+                      <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</span>
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button onClick={() => openEdit(item)} className="tap-btn" style={{ padding: "6px 12px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
@@ -830,6 +860,10 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
+                <th style={{ padding: "12px 14px", width: 40 }}>
+                  <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleSelectAll}
+                    style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+                </th>
                 {["Nama","Tipe","SKU","Satuan","Harga Jual","Modal","Stok","Aksi"].map(h => (
                   <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d4c8e0" }}>{h}</th>
                 ))}
@@ -838,8 +872,13 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
             <tbody>
               {filtered.map(item => {
                 const c = ITEM_COLORS[item.type];
+                const isSelected = selected.has(item.id);
                 return (
-                  <tr key={item.id} style={{ borderBottom: "1px solid #d4c8e0" }}>
+                  <tr key={item.id} style={{ borderBottom: "1px solid #d4c8e0", background: isSelected ? "#fde8f0" : "transparent" }}>
+                    <td style={{ padding: "12px 14px" }}>
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(item.id)}
+                        style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+                    </td>
                     <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 600 }}>{item.name}</td>
                     <td style={{ padding: "12px 14px" }}><span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</span></td>
                     <td style={{ padding: "12px 14px", fontSize: 13, color: "#7a8ab0" }}>{item.sku || "—"}</td>
@@ -1254,10 +1293,93 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
   const [form, setForm] = useState({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" });
 
   const openNew = () => { setForm({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (r) => { setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "" }); setEditing(r.id); setShowForm(true); };
+
+  // ── EXPORT ────────────────────────────────────────────────────────────────
+  const exportCSV = () => {
+    const headers = ["Expense Details","Event","Jumlah","PIC","Status","Tanggal","Catatan"];
+    const rows = reimburses.map(r => [
+      r.expense_details, r.event||"", r.amount, r.pic||"",
+      r.status, r.transaction_date||"", r.notes||""
+    ]);
+    const csv = [headers,...rows].map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF"+csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `KURESAPI_Reimbursement_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast("📥 Export berhasil!");
+  };
+
+  // ── IMPORT ────────────────────────────────────────────────────────────────
+  const handleImportCSV = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { showToast("File kosong!", "error"); setImporting(false); return; }
+
+      const parseRow = (line) => {
+        const cols = []; let cur = ""; let inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const c = line[i];
+          if (c === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+          else if (c === ',' && !inQ) { cols.push(cur.trim()); cur = ""; }
+          else cur += c;
+        }
+        cols.push(cur.trim());
+        return cols;
+      };
+
+      const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/\s/g,""));
+      const idx = (keys) => { for (const k of keys) { const i = headers.indexOf(k.toLowerCase().replace(/\s/g,"")); if (i>=0) return i; } return -1; };
+
+      const iDetail  = idx(["expensedetails","expense details","detail","keterangan pengeluaran","detailpengeluaran"]);
+      const iEvent   = idx(["event","acara"]);
+      const iAmount  = idx(["jumlah","amount","nominal","harga","biaya"]);
+      const iPic     = idx(["pic","nama","person"]);
+      const iStatus  = idx(["status","statusreimbursement","status reimbursement"]);
+      const iDate    = idx(["tanggal","date","transactiondate","transaction date"]);
+      const iNotes   = idx(["catatan","notes","keterangan"]);
+
+      if (iDetail < 0 && iAmount < 0) { showToast("Kolom tidak dikenali!", "error"); setImporting(false); return; }
+
+      const toImport = lines.slice(1)
+        .map(l => parseRow(l))
+        .filter(cols => cols[iDetail]?.trim())
+        .map(cols => {
+          const s = (cols[iStatus]||"").toLowerCase();
+          return {
+            expense_details: cols[iDetail]||"",
+            event: cols[iEvent]||"",
+            amount: Number((cols[iAmount]||"0").replace(/[^\d.]/g,""))||0,
+            pic: cols[iPic]||"",
+            status: (s.includes("done")||s.includes("paid")||s.includes("lunas")) ? "paid" : "unpaid",
+            transaction_date: cols[iDate]||null,
+            notes: cols[iNotes]||"",
+          };
+        });
+
+      if (!toImport.length) { showToast("Tidak ada data valid!", "error"); setImporting(false); return; }
+
+      let success = 0, fail = 0;
+      for (const item of toImport) {
+        try { await api("kr_reimbursements", { method: "POST", body: JSON.stringify(item), prefer: "return=minimal" }); success++; }
+        catch { fail++; }
+      }
+      onRefresh();
+      showToast(`✨ Import selesai! ${success} berhasil${fail>0?`, ${fail} gagal`:""}`);
+    } catch (err) { showToast("Gagal: " + err.message, "error"); }
+    setImporting(false);
+  };
 
   const save = async () => {
     if (!form.expense_details.trim()) return showToast("Detail pengeluaran wajib diisi", "error");
@@ -1300,7 +1422,6 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
       <div style={{ ...CARD, padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
         {[
           ["expense_details", "Detail Pengeluaran *", "text", "Contoh: Beli kawat bulu..."],
-          ["event", "Event", "text", "Workshop / Cupkets / Tomoland..."],
           ["amount", "💰 Jumlah (Rp) *", "number", "0"],
           ["pic", "PIC", "text", "Nama yang mengajukan"],
           ["transaction_date", "Tanggal Transaksi", "date", ""],
@@ -1312,6 +1433,24 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
               style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
           </div>
         ))}
+
+        {/* Event dropdown */}
+        <div>
+          <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Event</label>
+          <select value={["Workshop","Art Market","Lainnya"].includes(form.event) ? form.event : form.event ? "Lainnya" : ""}
+            onChange={e => setForm(f => ({ ...f, event: e.target.value === "Lainnya" ? "" : e.target.value, _eventCustom: e.target.value === "Lainnya" ? true : false }))}
+            style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, background: "#fff" }}>
+            <option value="">— Pilih event —</option>
+            <option value="Workshop">🎨 Workshop</option>
+            <option value="Art Market">🛍️ Art Market</option>
+            <option value="Lainnya">✏️ Lainnya...</option>
+          </select>
+          {(form._eventCustom || (form.event && !["Workshop","Art Market",""].includes(form.event))) && (
+            <input placeholder="Tulis nama event..." value={form.event}
+              onChange={e => setForm(f => ({ ...f, event: e.target.value }))}
+              style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box", marginTop: 8 }} />
+          )}
+        </div>
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 6, fontWeight: 600 }}>Status</label>
           <div style={{ display: "flex", gap: 8 }}>
@@ -1367,6 +1506,11 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
           ))}
         </div>
         <button onClick={openNew} className="tap-btn" style={{ padding: "9px 16px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Tambah</button>
+        <button onClick={exportCSV} className="tap-btn" style={{ padding: "9px 14px", background: "#e4f3fd", color: "#2d4ba0", border: "1.5px solid #a1def9", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>📥 Export</button>
+        <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13, flexShrink: 0 }}>
+          {importing ? "⏳ Import..." : "📤 Import CSV"}
+        </button>
+        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} style={{ display: "none" }} />
       </div>
 
       {/* List */}
