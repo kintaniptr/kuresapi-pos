@@ -595,9 +595,87 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
   const [editing, setEditing] = useState(null);
   const [filter, setFilter] = useState("all");
   const [form, setForm] = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" });
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   const openNew = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (item) => { setForm({ ...item, price: item.price || "", cost: item.cost || "", stock: item.stock || "" }); setEditing(item.id); setShowForm(true); };
+
+  // ── EXPORT ke Excel ──────────────────────────────────────────────────────
+  const exportExcel = () => {
+    const rows = [["Nama", "Tipe", "SKU", "Harga Jual", "Harga Modal", "Stok", "Satuan", "Keterangan"]];
+    items.forEach(i => rows.push([i.name, i.type, i.sku || "", i.price, i.cost, i.stock, i.unit, i.description || ""]));
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `KURESAPI_Inventory_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast("📥 Export berhasil!");
+  };
+
+  // ── IMPORT dari Excel/CSV ────────────────────────────────────────────────
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      // Gunakan SheetJS via CDN untuk baca Excel/CSV
+      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs");
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      if (!rows.length) return showToast("File kosong atau format tidak dikenali", "error");
+
+      // Mapping fleksibel — coba berbagai nama kolom
+      const get = (row, ...keys) => {
+        for (const k of keys) {
+          const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/\s/g,"") === k.toLowerCase().replace(/\s/g,""));
+          if (found && row[found] !== "") return row[found];
+        }
+        return "";
+      };
+
+      const toImport = rows
+        .filter(r => get(r, "name","namaitem","itemname","nama","item name","item_name"))
+        .map(r => ({
+          name: String(get(r, "name","namaitem","itemname","nama","item name","item_name")),
+          type: (() => {
+            const t = String(get(r, "type","tipe","kategori","category") || "product").toLowerCase();
+            if (t.includes("workshop")) return "workshop";
+            if (t.includes("equipment","perlengkapan","alat")) return "equipment";
+            return "product";
+          })(),
+          sku:   String(get(r, "sku","kode","itemid","item id") || ""),
+          price: Number(get(r, "price","hargajual","harga jual","harga") || 0),
+          cost:  Number(get(r, "cost","modal","hargamodal","harga modal") || 0),
+          stock: Number(get(r, "stock","stok","stocksisa","stock sisa","sisa","stockawal","stock awal") || 0),
+          unit:  String(get(r, "unit","satuan") || "pcs"),
+          description: String(get(r, "description","keterangan","notes","catatan") || ""),
+          is_active: true,
+        }));
+
+      if (!toImport.length) return showToast("Tidak ada data valid yang bisa diimport", "error");
+
+      // Upload ke Supabase satu per satu (batch)
+      let success = 0, fail = 0;
+      for (const item of toImport) {
+        try {
+          await api("kr_items", { method: "POST", body: JSON.stringify(item), prefer: "return=minimal" });
+          success++;
+        } catch { fail++; }
+      }
+
+      onRefresh();
+      showToast(`✨ Import selesai! ${success} item berhasil${fail > 0 ? `, ${fail} gagal` : ""}`);
+    } catch (err) {
+      showToast("Gagal import: " + err.message, "error");
+    }
+    setImporting(false);
+  };
 
   const save = async () => {
     if (!form.name.trim()) return showToast("Nama wajib diisi", "error");
@@ -671,6 +749,11 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
           ))}
         </div>
         <button onClick={openNew} className="tap-btn" style={{ padding: "9px 14px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>+ Tambah</button>
+        <button onClick={exportExcel} className="tap-btn" style={{ padding: "9px 14px", background: "#e4f3fd", color: "#2d4ba0", border: "1.5px solid #a1def9", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>📥 Export</button>
+        <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13, flexShrink: 0 }}>
+          {importing ? "⏳ Import..." : "📤 Import Excel"}
+        </button>
+        <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImportFile} style={{ display: "none" }} />
       </div>
 
       {filtered.length === 0 ? (
