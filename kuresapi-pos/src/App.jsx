@@ -81,6 +81,17 @@ create table if not exists kr_order_items (
   order_id uuid references kr_orders(id) on delete cascade,
   item_id uuid references kr_items(id),
   item_name text, qty int not null, price numeric(12,2), subtotal numeric(12,2)
+);
+create table if not exists kr_reimbursements (
+  id uuid primary key default gen_random_uuid(),
+  expense_details text not null,
+  event text,
+  amount numeric(12,2) default 0,
+  pic text,
+  status text default 'unpaid' check (status in ('unpaid','paid')),
+  transaction_date date,
+  notes text,
+  created_at timestamptz default now()
 );`;
 
 const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
@@ -97,11 +108,12 @@ const useIsMobile = () => {
 };
 
 const TABS = [
-  { id: "pos",       icon: "🛒", label: "Kasir",     roles: ["Admin","Kasir"] },
-  { id: "inventory", icon: "📦", label: "Inventory", roles: ["Admin","Kasir"] },
-  { id: "stock",     icon: "↕️", label: "Stok",      roles: ["Admin","Kasir"] },
-  { id: "sales",     icon: "📊", label: "Penjualan", roles: ["Admin","Kasir"] },
-  { id: "setup",     icon: "⚙️", label: "Setup",     roles: ["Admin"] },
+  { id: "pos",       icon: "🛒", label: "Kasir",         roles: ["Admin","Kasir"] },
+  { id: "inventory", icon: "📦", label: "Inventory",     roles: ["Admin","Kasir"] },
+  { id: "stock",     icon: "↕️", label: "Stok",          roles: ["Admin","Kasir"] },
+  { id: "sales",     icon: "📊", label: "Penjualan",     roles: ["Admin","Kasir"] },
+  { id: "reimburse", icon: "💸", label: "Reimbursement", roles: ["Admin"] },
+  { id: "setup",     icon: "⚙️", label: "Setup",         roles: ["Admin"] },
 ];
 
 export default function App() {
@@ -109,6 +121,7 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [orders, setOrders] = useState([]);
   const [moves, setMoves] = useState([]);
+  const [reimburses, setReimburses] = useState([]);
   const [toast, setToast] = useState(null);
   const [user, setUser] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem("kr_user")) || null; } catch { return null; }
@@ -140,8 +153,11 @@ export default function App() {
   const loadMoves = useCallback(async () => {
     try { setMoves(await api("kr_stock_moves?order=created_at.desc&limit=200")); } catch {}
   }, []);
+  const loadReimburses = useCallback(async () => {
+    try { setReimburses(await api("kr_reimbursements?order=created_at.desc")); } catch {}
+  }, []);
 
-  useEffect(() => { loadItems(); loadOrders(); loadMoves(); }, []);
+  useEffect(() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); }, []);
 
   // Tampilkan login screen kalau belum login
   if (!user) return <LoginScreen onLogin={handleLogin} isMobile={isMobile} />;
@@ -203,7 +219,8 @@ export default function App() {
         {tab === "inventory" && <Inventory items={items} onRefresh={loadItems} showToast={showToast} isMobile={isMobile} />}
         {tab === "stock"     && <StockMoves items={items} moves={moves} onRefresh={() => { loadItems(); loadMoves(); }} showToast={showToast} isMobile={isMobile} />}
         {tab === "sales"     && <Sales orders={orders} items={items} onRefresh={loadOrders} showToast={showToast} isMobile={isMobile} />}
-        {tab === "setup"     && user.role === "Admin" && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); }} />}
+        {tab === "reimburse" && <Reimbursement reimburses={reimburses} onRefresh={loadReimburses} showToast={showToast} isMobile={isMobile} />}
+        {tab === "setup"     && user.role === "Admin" && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); }} />}
         {tab === "setup"     && user.role !== "Admin" && (
           <div style={{ textAlign: "center", padding: "80px 0", color: "#7a8ab0" }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>🔒</div>
@@ -1209,6 +1226,199 @@ function OrderDetail({ detail, orderItems, loadingDetail, onClose, onDelete }) {
         </>
       )}
     </>
+  );
+}
+
+// ─── REIMBURSEMENT ────────────────────────────────────────────────────────────
+function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [form, setForm] = useState({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" });
+
+  const openNew = () => { setForm({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
+  const openEdit = (r) => { setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "" }); setEditing(r.id); setShowForm(true); };
+
+  const save = async () => {
+    if (!form.expense_details.trim()) return showToast("Detail pengeluaran wajib diisi", "error");
+    try {
+      const payload = { ...form, amount: Number(form.amount) || 0, transaction_date: form.transaction_date || null };
+      if (editing) {
+        await api(`kr_reimbursements?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
+        showToast("✅ Reimbursement diperbarui!");
+      } else {
+        await api("kr_reimbursements", { method: "POST", body: JSON.stringify(payload), prefer: "return=minimal" });
+        showToast("✨ Reimbursement ditambahkan!");
+      }
+      setShowForm(false); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const toggleStatus = async (r) => {
+    const newStatus = r.status === "paid" ? "unpaid" : "paid";
+    try {
+      await api(`kr_reimbursements?id=eq.${r.id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus }), prefer: "return=minimal" });
+      showToast(newStatus === "paid" ? "✅ Ditandai sudah dibayar!" : "↩️ Ditandai belum dibayar");
+      onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const deleteItem = async (r) => {
+    try {
+      await api(`kr_reimbursements?id=eq.${r.id}`, { method: "DELETE", prefer: "return=minimal" });
+      showToast("🗑️ Dihapus!"); setConfirmDelete(null); onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const filtered = reimburses.filter(r => filterStatus === "all" || r.status === filterStatus);
+  const totalUnpaid = reimburses.filter(r => r.status === "unpaid").reduce((s, r) => s + (r.amount || 0), 0);
+  const totalPaid = reimburses.filter(r => r.status === "paid").reduce((s, r) => s + (r.amount || 0), 0);
+
+  if (showForm) return (
+    <div style={{ maxWidth: 560 }}>
+      <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 18, color: "#1a2a5e" }}>{editing ? "✏️ Edit Reimbursement" : "✨ Tambah Reimbursement"}</div>
+      <div style={{ ...CARD, padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+        {[
+          ["expense_details", "Detail Pengeluaran *", "text", "Contoh: Beli kawat bulu..."],
+          ["event", "Event", "text", "Workshop / Cupkets / Tomoland..."],
+          ["amount", "💰 Jumlah (Rp) *", "number", "0"],
+          ["pic", "PIC", "text", "Nama yang mengajukan"],
+          ["transaction_date", "Tanggal Transaksi", "date", ""],
+          ["notes", "Catatan", "text", "Opsional"],
+        ].map(([k, l, t, ph]) => (
+          <div key={k}>
+            <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>{l}</label>
+            <input type={t} placeholder={ph} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+              style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+        ))}
+        <div>
+          <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 6, fontWeight: 600 }}>Status</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["unpaid", "⏳ Belum Dibayar"], ["paid", "✅ Sudah Dibayar"]].map(([v, l]) => (
+              <button key={v} onClick={() => setForm(f => ({ ...f, status: v }))} style={{
+                flex: 1, padding: "10px 0", border: `2px solid ${form.status === v ? (v === "paid" ? "#10b981" : "#f59e0b") : "#d0e5f5"}`,
+                borderRadius: 10, background: form.status === v ? (v === "paid" ? "#d1fae5" : "#fef3c7") : "#fff",
+                color: form.status === v ? (v === "paid" ? "#10b981" : "#f59e0b") : "#7a8ab0",
+                fontWeight: form.status === v ? 700 : 500, cursor: "pointer", fontSize: 13,
+              }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+          <button onClick={save} style={{ flex: 1, padding: "13px 0", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+            {editing ? "💾 Simpan" : "✨ Tambah"}
+          </button>
+          <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: "13px 0", background: "#fff", color: "#1a2a5e", border: "1.5px solid #d0e5f5", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 14 }}>Batal</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      {confirmDelete && <ConfirmModal title="Hapus Reimbursement?" message={`Hapus "${confirmDelete.expense_details}" (${formatRp(confirmDelete.amount)}) secara permanen?`} onConfirm={() => deleteItem(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+
+      {/* Stat Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
+        {[
+          { label: "Total Entri", value: reimburses.length, icon: "🧾", accent: "#2d4ba0" },
+          { label: "Belum Dibayar", value: formatRp(totalUnpaid), icon: "⏳", accent: "#f59e0b" },
+          { label: "Sudah Dibayar", value: formatRp(totalPaid), icon: "✅", accent: "#10b981" },
+        ].map(s => (
+          <div key={s.label} style={{ ...CARD, padding: isMobile ? "12px 14px" : "18px 20px", borderTop: `4px solid ${s.accent}` }}>
+            <div style={{ fontSize: 12, color: "#7a8ab0", marginBottom: 5, fontWeight: 600 }}>{s.icon} {s.label}</div>
+            <div style={{ fontSize: isMobile ? 15 : 20, fontWeight: 800, color: s.accent }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter + Add */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[["all","Semua"],["unpaid","⏳ Belum Dibayar"],["paid","✅ Sudah Dibayar"]].map(([v,l]) => (
+            <button key={v} onClick={() => setFilterStatus(v)} className="tap-btn" style={{
+              padding: "7px 14px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+              border: `2px solid ${filterStatus === v ? "#2d4ba0" : "#d0e5f5"}`,
+              background: filterStatus === v ? "#e4f3fd" : "#fff",
+              color: filterStatus === v ? "#2d4ba0" : "#7a8ab0",
+              fontWeight: filterStatus === v ? 700 : 500,
+            }}>{l} <span style={{ opacity: 0.7 }}>({reimburses.filter(r => v === "all" || r.status === v).length})</span></button>
+          ))}
+        </div>
+        <button onClick={openNew} className="tap-btn" style={{ padding: "9px 16px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Tambah</button>
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div style={{ ...CARD, padding: 60, textAlign: "center", color: "#7a8ab0" }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>💸</div>
+          <div style={{ fontWeight: 600 }}>Belum ada reimbursement</div>
+        </div>
+      ) : isMobile ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.map(r => (
+            <div key={r.id} style={{ ...CARD, padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#1a2a5e", marginBottom: 2 }}>{r.expense_details}</div>
+                  <div style={{ fontSize: 12, color: "#7a8ab0" }}>{r.event || "—"} {r.pic ? `· ${r.pic}` : ""}</div>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#ee4181", marginLeft: 10, flexShrink: 0 }}>{formatRp(r.amount)}</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
+                  padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
+                  background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
+                  color: r.status === "paid" ? "#10b981" : "#f59e0b",
+                }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
+                  <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ ...CARD, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
+                {["Detail Pengeluaran","Event","PIC","Jumlah","Tanggal","Status","Aksi"].map(h => (
+                  <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d0e5f5" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.id} style={{ borderBottom: "1px solid #d0e5f5" }}>
+                  <td style={{ padding: "11px 14px", fontSize: 13, fontWeight: 600, color: "#1a2a5e", maxWidth: 240 }}>{r.expense_details}</td>
+                  <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.event || "—"}</td>
+                  <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.pic || "—"}</td>
+                  <td style={{ padding: "11px 14px", fontSize: 14, fontWeight: 700, color: "#ee4181" }}>{formatRp(r.amount)}</td>
+                  <td style={{ padding: "11px 14px", fontSize: 12, color: "#7a8ab0" }}>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" }) : "—"}</td>
+                  <td style={{ padding: "11px 14px" }}>
+                    <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
+                      padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
+                      background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
+                      color: r.status === "paid" ? "#10b981" : "#f59e0b",
+                    }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
+                  </td>
+                  <td style={{ padding: "11px 14px" }}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
+                      <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
