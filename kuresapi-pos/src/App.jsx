@@ -106,7 +106,9 @@ create table if not exists kr_reimbursements (
   notes text,
   created_at timestamptz default now()
 );
-alter table kr_reimbursements disable row level security;`;
+alter table kr_reimbursements disable row level security;
+-- Bundle qty: berapa pcs fisik per 1 unit jual (default 1 = satuan)
+alter table kr_items add column if not exists bundle_qty int default 1;`;
 
 const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
 const formatDate = (d) => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -417,10 +419,11 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
       await api("kr_order_items", { method: "POST", body: JSON.stringify(cart.map(x => ({ order_id: order.id, item_id: x.id, item_name: x.name, qty: x.qty, price: x.price, subtotal: x.price * x.qty }))), prefer: "return=minimal" });
       const stockItems = cart.filter(x => x.type !== "workshop");
       if (stockItems.length) {
-        await api("kr_stock_moves", { method: "POST", body: JSON.stringify(stockItems.map(x => ({ item_id: x.id, direction: "out", qty: x.qty, note: `Penjualan ${orderNo}`, ref_id: order.id }))), prefer: "return=minimal" });
+        await api("kr_stock_moves", { method: "POST", body: JSON.stringify(stockItems.map(x => ({ item_id: x.id, direction: "out", qty: x.qty * (x.bundle_qty||1), note: `Penjualan ${orderNo}`, ref_id: order.id }))), prefer: "return=minimal" });
         for (const m of stockItems) {
           const item = items.find(i => i.id === m.id);
-          if (item) await api(`kr_items?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ stock: (item.stock || 0) - m.qty }), prefer: "return=minimal" });
+          const deduct = m.qty * (m.bundle_qty || 1);
+          if (item) await api(`kr_items?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ stock: (item.stock || 0) - deduct }), prefer: "return=minimal" });
         }
       }
       setInvoice({ ...order, items: cart, customer, customerPhone, payment, subtotal, discount, total });
@@ -465,13 +468,15 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
               {filtered.map(item => {
                 const c = ITEM_COLORS[item.type];
-                const outOfStock = item.type !== "workshop" && item.stock <= 0;
+                const bq = item.bundle_qty || 1;
+                const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor((item.stock||0) / bq);
+                const outOfStock = item.type !== "workshop" && bundlesLeft <= 0;
                 return (
                   <button key={item.id} onClick={() => { if (!outOfStock) { addToCart(item); } }} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 14, padding: 12, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, width: "100%" }}>
                     <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, display: "inline-block", marginBottom: 6, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, color: "#1a2a5e" }}>{item.name}</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}</div>
-                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : `Stok: ${item.stock}`}</div>}
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
+                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : `Sisa ${bundlesLeft} bundle`}</div>}
                   </button>
                 );
               })}
@@ -509,13 +514,15 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))", gap: 14 }}>
                 {filtered.map(item => {
                   const c = ITEM_COLORS[item.type];
-                  const outOfStock = item.type !== "workshop" && item.stock <= 0;
+                  const bq = item.bundle_qty || 1;
+                  const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor((item.stock||0) / bq);
+                  const outOfStock = item.type !== "workshop" && bundlesLeft <= 0;
                   return (
                     <button key={item.id} onClick={() => !outOfStock && addToCart(item)} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 16, padding: 16, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, boxShadow: `0 2px 10px ${c.bg}` }}>
                       <div style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, display: "inline-block", marginBottom: 8, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, lineHeight: 1.35, color: "#1a2a5e" }}>{item.name}</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}</div>
-                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : `📦 Stok: ${item.stock}`}</div>}
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
+                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : bundlesLeft <= 3 ? `⚠️ Sisa ${bundlesLeft} bundle` : `📦 Sisa ${bundlesLeft} bundle`}</div>}
                     </button>
                   );
                 })}
@@ -886,7 +893,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState(null);
   const [filter, setFilter]     = useState("all");
-  const [form, setForm]         = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" });
+  const [form, setForm]         = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", bundle_qty: 1, description: "" });
   const [importing, setImporting] = useState(false);
   const [selected, setSelected]   = useState(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
@@ -935,13 +942,13 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
   const discardEdits = () => { setInlineEdits({}); setActiveCell(null); };
 
   // ── Detail form save ─────────────────────────────────────────────────────
-  const openNew  = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" }); setEditing(null); setShowForm(true); };
-  const openEdit = (item) => { setForm({ ...item, price: item.price||"", cost: item.cost||"", stock: item.stock||"" }); setEditing(item.id); setShowForm(true); };
+  const openNew  = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", bundle_qty: 1, description: "" }); setEditing(null); setShowForm(true); };
+  const openEdit = (item) => { setForm({ ...item, price: item.price||"", cost: item.cost||"", stock: item.stock||"", bundle_qty: item.bundle_qty||1 }); setEditing(item.id); setShowForm(true); };
 
   const save = async () => {
     if (!form.name.trim()) return showToast("Nama wajib diisi", "error");
     try {
-      const payload = { ...form, price: Number(form.price)||0, cost: Number(form.cost)||0, stock: Number(form.stock)||0 };
+      const payload = { ...form, price: Number(form.price)||0, cost: Number(form.cost)||0, stock: Number(form.stock)||0, bundle_qty: Number(form.bundle_qty)||1 };
       if (editing) {
         await api(`kr_items?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
         showToast("✅ Item diperbarui!");
@@ -1001,8 +1008,21 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     setImporting(false);
   };
 
-  const filtered = items.filter(i => filter === "all" || i.type === filter);
-  const stats = { all: items.length, product: items.filter(x=>x.type==="product").length, workshop: items.filter(x=>x.type==="workshop").length, equipment: items.filter(x=>x.type==="equipment").length };
+  const filtered = items.filter(i => {
+    const bq = i.bundle_qty || 1;
+    const bundles = i.type === "workshop" ? Infinity : Math.floor((i.stock||0) / bq);
+    if (filter === "low")  return i.type !== "workshop" && bundles > 0 && bundles <= 3;
+    if (filter === "out")  return i.type !== "workshop" && bundles <= 0;
+    return filter === "all" || i.type === filter;
+  });
+  const stats = {
+    all: items.length,
+    product: items.filter(x=>x.type==="product").length,
+    workshop: items.filter(x=>x.type==="workshop").length,
+    equipment: items.filter(x=>x.type==="equipment").length,
+    low: items.filter(x=>{ const bq=x.bundle_qty||1; const b=Math.floor((x.stock||0)/bq); return x.type!=="workshop"&&b>0&&b<=3; }).length,
+    out: items.filter(x=>{ const bq=x.bundle_qty||1; return x.type!=="workshop"&&Math.floor((x.stock||0)/bq)<=0; }).length,
+  };
 
 
   // ── Detail form ──────────────────────────────────────────────────────────────
@@ -1019,12 +1039,29 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
             })}
           </div>
         </div>
-        {[["name","Nama *","text","Nama produk / workshop..."],["sku","SKU / Kode","text","Opsional"],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal","number","0"]].map(([k,l,t,ph]) => (
+        {[["name","Nama *","text","Nama produk / workshop..."],["sku","SKU / Kode","text","Opsional"],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
           <div key={k}>
             <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>{l}</label>
             <input type={t} placeholder={ph} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:15 }} />
           </div>
         ))}
+        <div style={{ background:"#fef9c3",border:"1.5px solid #f59e0b",borderRadius:10,padding:"12px 14px" }}>
+          <label style={{ fontSize:13,color:"#92400e",display:"block",marginBottom:5,fontWeight:700 }}>📦 Bundle — Jual per berapa pcs?</label>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <input type="number" min={1} placeholder="1" value={form.bundle_qty} onChange={e=>setForm(f=>({...f,bundle_qty:e.target.value}))}
+              style={{ width:80,padding:"10px 12px",border:"1.5px solid #f59e0b",borderRadius:9,fontSize:15,fontWeight:700,textAlign:"center" }} />
+            <span style={{ fontSize:13,color:"#92400e" }}>
+              {Number(form.bundle_qty)>1
+                ? `pcs → 1x klik kasir = ${form.bundle_qty} pcs fisik berkurang`
+                : "pcs (satuan normal, tidak bundle)"}
+            </span>
+          </div>
+          {Number(form.bundle_qty)>1 && Number(form.stock)>0 && (
+            <div style={{ marginTop:8,fontSize:12,color:"#92400e" }}>
+              💡 Stok {form.stock} pcs fisik = <b>{Math.floor(Number(form.stock)/Number(form.bundle_qty))} bundle</b> yang bisa dijual
+            </div>
+          )}
+        </div>
         <div>
           <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>Keterangan</label>
           <textarea rows={2} placeholder="Deskripsi opsional..." value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:14,resize:"vertical" }} />
@@ -1071,9 +1108,9 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
       {/* ── Toolbar ── */}
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:8,flexWrap:"wrap" }}>
         <div style={{ display:"flex",gap:6,overflowX:"auto",paddingBottom:4,flex:1 }}>
-          {[["all","Semua"],["product","Produk"],["workshop","Workshop"],["equipment","Perlengkapan"]].map(([v,l]) => (
-            <button key={v} onClick={()=>setFilter(v)} className="tap-btn" style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${filter===v?"#ee4181":"#d4c8e0"}`,background:filter===v?"#fde8f0":"#fff",color:filter===v?"#ee4181":"#7a8ab0",fontWeight:filter===v?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
-              {l} <span style={{opacity:0.7}}>({stats[v]})</span>
+          {[["all","Semua"],["product","Produk"],["workshop","Workshop"],["equipment","Perlengkapan"],["low","⚠️ Hampir Habis"],["out","❌ Habis"]].map(([v,l]) => (
+            <button key={v} onClick={()=>setFilter(v)} className="tap-btn" style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${filter===v?(v==="out"?"#ef4444":v==="low"?"#f59e0b":"#ee4181"):"#d4c8e0"}`,background:filter===v?(v==="out"?"#fee2e2":v==="low"?"#fef9c3":"#fde8f0"):"#fff",color:filter===v?(v==="out"?"#ef4444":v==="low"?"#92400e":"#ee4181"):"#7a8ab0",fontWeight:filter===v?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
+              {l} <span style={{opacity:0.7}}>({stats[v]||0})</span>
             </button>
           ))}
         </div>
@@ -1161,9 +1198,11 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                   { label:"Tipe",      w:120 },
                   { label:"SKU",       w:100 },
                   { label:"Satuan",    w:80  },
+                  { label:"Bundle",    w:90  },
                   { label:"Harga Jual",w:120 },
                   { label:"Modal",     w:110 },
-                  { label:"Stok",      w:80  },
+                  { label:"Stok (pcs)",w:100 },
+                  { label:"Sisa Bundle",w:100},
                   { label:"Aksi",      w:130 },
                 ].map(({ label, w }) => (
                   <th key={label} style={{ padding:"12px 8px",textAlign:"left",fontSize:12,color:"#1a2a5e",fontWeight:700,borderBottom:"2px solid #d4c8e0",minWidth:w }}>
@@ -1207,6 +1246,21 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                       <InlineCell val={getVal(item,"unit")} isDirty={!!inlineEdits[item.id]?.unit} isActive={activeCell?.id===item.id&&activeCell?.field==="unit"} onActivate={()=>setActiveCell({id:item.id,field:"unit"})} onChange={v=>setCell(item.id,"unit",v)} onDeactivate={()=>setActiveCell(null)} width={70} />
                     </td>
 
+                    {/* Bundle */}
+                    <td style={{ padding:"4px 8px" }}>
+                      {curType === "workshop"
+                        ? <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:6}}>—</span>
+                        : <InlineCell val={getVal(item,"bundle_qty")||1} isDirty={!!inlineEdits[item.id]?.bundle_qty} isActive={activeCell?.id===item.id&&activeCell?.field==="bundle_qty"} onActivate={()=>setActiveCell({id:item.id,field:"bundle_qty"})} onChange={v=>setCell(item.id,"bundle_qty",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="center" width={70}
+                            format={v => {
+                              const n = Number(v)||1;
+                              return n > 1
+                                ? <span style={{background:"#fef9c3",border:"1px solid #f59e0b",borderRadius:6,padding:"2px 7px",fontSize:11,fontWeight:700,color:"#92400e"}}>{n} pcs</span>
+                                : <span style={{color:"#c8d2e0",fontSize:12}}>1 pcs</span>;
+                            }}
+                          />
+                      }
+                    </td>
+
                     {/* Harga Jual */}
                     <td style={{ padding:"4px 8px" }}>
                       <InlineCell val={getVal(item,"price")} isDirty={!!inlineEdits[item.id]?.price} isActive={activeCell?.id===item.id&&activeCell?.field==="price"} onActivate={()=>setActiveCell({id:item.id,field:"price"})} onChange={v=>setCell(item.id,"price",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={110}
@@ -1221,13 +1275,28 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                       />
                     </td>
 
-                    {/* Stok */}
+                    {/* Stok pcs */}
                     <td style={{ padding:"4px 8px" }}>
                       {curType === "workshop"
                         ? <span style={{color:"#d4c8e0",fontSize:13,paddingLeft:6}}>—</span>
-                        : <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={70}
-                            format={v => { const n=Number(v)||0; return <span style={{fontWeight:700,color:n<=5?"#ef4444":"#10b981"}}>{n}</span>; }}
+                        : <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={80}
+                            format={v => { const n=Number(v)||0; const bq=Number(getVal(item,"bundle_qty"))||1; const low=n<bq; return <span style={{fontWeight:700,color:low?"#ef4444":n<=(bq*3)?"#f59e0b":"#10b981"}}>{n} pcs</span>; }}
                           />
+                      }
+                    </td>
+
+                    {/* Sisa Bundle */}
+                    <td style={{ padding:"4px 8px",textAlign:"center" }}>
+                      {curType === "workshop"
+                        ? <span style={{color:"#d4c8e0",fontSize:12}}>—</span>
+                        : (() => {
+                            const stok = Number(getVal(item,"stock"))||0;
+                            const bq   = Number(getVal(item,"bundle_qty"))||1;
+                            const sisa = Math.floor(stok / bq);
+                            if (sisa <= 0)  return <span style={{background:"#fee2e2",color:"#ef4444",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>❌ Habis</span>;
+                            if (sisa <= 3)  return <span style={{background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>⚠️ {sisa} bundle</span>;
+                            return <span style={{background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>✅ {sisa} bundle</span>;
+                          })()
                       }
                     </td>
 
