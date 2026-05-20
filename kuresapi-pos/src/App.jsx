@@ -432,7 +432,109 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
 
   if (invoice) return <InvoiceView invoice={invoice} onClose={() => setInvoice(null)} isMobile={isMobile} />;
 
-  const CartPanel = () => (
+  const cartProps = { cart, cartCount, customer, setCustomer, customerPhone, setCustomerPhone, selectedEvent, setSelectedEvent, activeEvents, isMobile, subtotal, discount, setDiscount, total, payment, setPayment, checkout, saving, updateQty };
+
+
+
+  return (
+    <div>
+      {/* Search + Filter */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }}>🔍</span>
+          <input placeholder="Cari produk..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "11px 12px 11px 34px", border: "1.5px solid #d4c8e0", borderRadius: 12, fontSize: 14, background: "#fff" }} />
+        </div>
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: "0 10px", border: "1.5px solid #d4c8e0", borderRadius: 12, fontSize: 13, background: "#fff", color: "#1a2a5e", minWidth: isMobile ? 90 : 140 }}>
+          <option value="all">{isMobile ? "Semua" : "✨ Semua"}</option>
+          <option value="product">{isMobile ? "Produk" : "📦 Produk"}</option>
+          <option value="workshop">{isMobile ? "Workshop" : "🎓 Workshop"}</option>
+          <option value="equipment">{isMobile ? "Perlengkapan" : "🔧 Perlengkapan"}</option>
+        </select>
+      </div>
+
+      {/* Desktop: side-by-side. Mobile: products only + floating cart button */}
+      {isMobile ? (
+        <>
+          {/* Product grid mobile */}
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "60px 0", color: "#7a8ab0" }}>
+              <div style={{ fontSize: 48 }}>🌸</div>
+              <div style={{ fontWeight: 600, marginTop: 8 }}>Belum ada item</div>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+              {filtered.map(item => {
+                const c = ITEM_COLORS[item.type];
+                const outOfStock = item.type !== "workshop" && item.stock <= 0;
+                return (
+                  <button key={item.id} onClick={() => { if (!outOfStock) { addToCart(item); } }} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 14, padding: 12, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, width: "100%" }}>
+                    <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, display: "inline-block", marginBottom: 6, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, color: "#1a2a5e" }}>{item.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}</div>
+                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : `Stok: ${item.stock}`}</div>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Floating cart button */}
+          {cart.length > 0 && (
+            <button onClick={() => setShowCart(true)} className="tap-btn" style={{ position: "fixed", bottom: 82, right: 16, background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 20, padding: "12px 20px", fontSize: 14, fontWeight: 700, boxShadow: "0 4px 20px rgba(45,75,160,0.4)", zIndex: 150, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              🛒 {cartCount} item · {formatRp(total)}
+            </button>
+          )}
+
+          {/* Cart bottom sheet */}
+          {showCart && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+              <div onClick={() => setShowCart(false)} style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} />
+              <div style={{ background: "#fadeeb", borderRadius: "20px 20px 0 0", padding: 20, maxHeight: "85vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+                <div style={{ width: 36, height: 4, background: "#d4c8e0", borderRadius: 2, margin: "0 auto 16px" }} />
+                <CartPanel {...cartProps} />
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        /* Desktop: 2-column */
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", gap: 24 }}>
+          <div>
+            {filtered.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "80px 0", color: "#7a8ab0" }}>
+                <div style={{ fontSize: 52 }}>🌸</div>
+                <div style={{ fontSize: 16, fontWeight: 600, marginTop: 8 }}>Belum ada item</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))", gap: 14 }}>
+                {filtered.map(item => {
+                  const c = ITEM_COLORS[item.type];
+                  const outOfStock = item.type !== "workshop" && item.stock <= 0;
+                  return (
+                    <button key={item.id} onClick={() => !outOfStock && addToCart(item)} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 16, padding: 16, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, boxShadow: `0 2px 10px ${c.bg}` }}>
+                      <div style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, display: "inline-block", marginBottom: 8, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, lineHeight: 1.35, color: "#1a2a5e" }}>{item.name}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}</div>
+                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : `📦 Stok: ${item.stock}`}</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div style={{ position: "sticky", top: 110 }}>
+            <CartPanel {...cartProps} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── CART PANEL ───────────────────────────────────────────────────────────────
+function CartPanel({ cart, cartCount, customer, setCustomer, customerPhone, setCustomerPhone, selectedEvent, setSelectedEvent, activeEvents, isMobile, subtotal, discount, setDiscount, total, payment, setPayment, checkout, saving, updateQty }) {
+  return (
     <div style={{ ...CARD, padding: 18 }}>
       <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14, color: "#1a2a5e", display: "flex", alignItems: "center", gap: 8 }}>
         🛒 Keranjang
@@ -490,100 +592,6 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
           {saving ? "⏳ Memproses..." : "✨ Proses Pembayaran"}
         </button>
       </div>
-    </div>
-  );
-
-  return (
-    <div>
-      {/* Search + Filter */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <div style={{ flex: 1, position: "relative" }}>
-          <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }}>🔍</span>
-          <input placeholder="Cari produk..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "11px 12px 11px 34px", border: "1.5px solid #d4c8e0", borderRadius: 12, fontSize: 14, background: "#fff" }} />
-        </div>
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: "0 10px", border: "1.5px solid #d4c8e0", borderRadius: 12, fontSize: 13, background: "#fff", color: "#1a2a5e", minWidth: isMobile ? 90 : 140 }}>
-          <option value="all">{isMobile ? "Semua" : "✨ Semua"}</option>
-          <option value="product">{isMobile ? "Produk" : "📦 Produk"}</option>
-          <option value="workshop">{isMobile ? "Workshop" : "🎓 Workshop"}</option>
-          <option value="equipment">{isMobile ? "Perlengkapan" : "🔧 Perlengkapan"}</option>
-        </select>
-      </div>
-
-      {/* Desktop: side-by-side. Mobile: products only + floating cart button */}
-      {isMobile ? (
-        <>
-          {/* Product grid mobile */}
-          {filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#7a8ab0" }}>
-              <div style={{ fontSize: 48 }}>🌸</div>
-              <div style={{ fontWeight: 600, marginTop: 8 }}>Belum ada item</div>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-              {filtered.map(item => {
-                const c = ITEM_COLORS[item.type];
-                const outOfStock = item.type !== "workshop" && item.stock <= 0;
-                return (
-                  <button key={item.id} onClick={() => { if (!outOfStock) { addToCart(item); } }} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 14, padding: 12, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, width: "100%" }}>
-                    <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, display: "inline-block", marginBottom: 6, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, color: "#1a2a5e" }}>{item.name}</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}</div>
-                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : `Stok: ${item.stock}`}</div>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Floating cart button */}
-          {cart.length > 0 && (
-            <button onClick={() => setShowCart(true)} className="tap-btn" style={{ position: "fixed", bottom: 82, right: 16, background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 20, padding: "12px 20px", fontSize: 14, fontWeight: 700, boxShadow: "0 4px 20px rgba(45,75,160,0.4)", zIndex: 150, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-              🛒 {cartCount} item · {formatRp(total)}
-            </button>
-          )}
-
-          {/* Cart bottom sheet */}
-          {showCart && (
-            <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-              <div onClick={() => setShowCart(false)} style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} />
-              <div style={{ background: "#fadeeb", borderRadius: "20px 20px 0 0", padding: 20, maxHeight: "85vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
-                <div style={{ width: 36, height: 4, background: "#d4c8e0", borderRadius: 2, margin: "0 auto 16px" }} />
-                <CartPanel />
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        /* Desktop: 2-column */
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", gap: 24 }}>
-          <div>
-            {filtered.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "80px 0", color: "#7a8ab0" }}>
-                <div style={{ fontSize: 52 }}>🌸</div>
-                <div style={{ fontSize: 16, fontWeight: 600, marginTop: 8 }}>Belum ada item</div>
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))", gap: 14 }}>
-                {filtered.map(item => {
-                  const c = ITEM_COLORS[item.type];
-                  const outOfStock = item.type !== "workshop" && item.stock <= 0;
-                  return (
-                    <button key={item.id} onClick={() => !outOfStock && addToCart(item)} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 16, padding: 16, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, boxShadow: `0 2px 10px ${c.bg}` }}>
-                      <div style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, display: "inline-block", marginBottom: 8, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, lineHeight: 1.35, color: "#1a2a5e" }}>{item.name}</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}</div>
-                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: item.stock <= 5 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : `📦 Stok: ${item.stock}`}</div>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div style={{ position: "sticky", top: 110 }}>
-            <CartPanel />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
