@@ -383,6 +383,7 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
   const activeEvents = (events || []).filter(e => e.status === "ongoing" || e.status === "upcoming");
 
   const filtered = items.filter(i =>
+    i.type !== "equipment" &&
     (typeFilter === "all" || i.type === typeFilter) &&
     (i.name.toLowerCase().includes(search.toLowerCase()) || (i.sku || "").toLowerCase().includes(search.toLowerCase()))
   );
@@ -448,7 +449,6 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
           <option value="all">{isMobile ? "Semua" : "✨ Semua"}</option>
           <option value="product">{isMobile ? "Produk" : "📦 Produk"}</option>
           <option value="workshop">{isMobile ? "Workshop" : "🎓 Workshop"}</option>
-          <option value="equipment">{isMobile ? "Perlengkapan" : "🔧 Perlengkapan"}</option>
         </select>
       </div>
 
@@ -786,7 +786,7 @@ function InvoiceView({ invoice, onClose, isMobile }) {
             {invoice.items?.map((item,i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:"1px dashed #e8edf8"}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:14,fontWeight:600,color:"#1a2a5e",marginBottom:2}}>{item.name}</div>
+                  <div style={{fontSize:14,fontWeight:600,color:"#1a2a5e",marginBottom:2}}>{item.name||item.item_name}</div>
                   <div style={{fontSize:12,color:"#7a8ab0"}}>{formatRp(item.price)} × {item.qty}</div>
                 </div>
                 <div style={{fontWeight:700,fontSize:14,color:"#1a2a5e",marginLeft:12,flexShrink:0}}>{formatRp(item.price*item.qty)}</div>
@@ -1399,7 +1399,7 @@ function MovesList({ moves, itemMap, isMobile, onDelete }) {
 }
 
 // ─── SALES ────────────────────────────────────────────────────────────────────
-function Sales({ orders, onRefresh, showToast, isMobile }) {
+function Sales({ orders, items, onRefresh, showToast, isMobile }) {
   const [detail, setDetail] = useState(null);
   const [orderItems, setOrderItems] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -1407,6 +1407,7 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
   const [period, setPeriod] = useState("daily");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [reInvoice, setReInvoice] = useState(null); // invoice yg dibuka ulang
 
   const deleteOrder = async (order) => {
     try {
@@ -1421,6 +1422,15 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
     try { setOrderItems(await api(`kr_order_items?order_id=eq.${order.id}`)); } catch {}
     setLoadingDetail(false);
   };
+
+  const openInvoice = (order, oi) => {
+    setReInvoice({
+      ...order,
+      items: oi.map(i => ({ name: i.item_name, price: i.price, qty: i.qty })),
+    });
+  };
+
+  if (reInvoice) return <InvoiceView invoice={reInvoice} onClose={() => setReInvoice(null)} isMobile={isMobile} />;
 
   // Filter orders by period
   const now = new Date();
@@ -1532,7 +1542,7 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
               <div onClick={() => setDetail(null)} style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} />
               <div style={{ background: "#fdf4fb", borderRadius: "20px 20px 0 0", padding: 20, maxHeight: "80vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
                 <div style={{ width: 36, height: 4, background: "#d4c8e0", borderRadius: 2, margin: "0 auto 16px" }} />
-                <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} />
+                <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} onInvoice={() => openInvoice(detail, orderItems)} />
               </div>
             </div>
           )}
@@ -1579,7 +1589,7 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
           </div>
           {detail && (
             <div style={{ ...CARD, padding: 20, height: "fit-content", position: "sticky", top: 110 }}>
-              <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} />
+              <OrderDetail detail={detail} orderItems={orderItems} loadingDetail={loadingDetail} onClose={() => setDetail(null)} onDelete={() => setConfirmDelete(detail)} onInvoice={() => openInvoice(detail, orderItems)} />
             </div>
           )}
         </div>
@@ -1588,12 +1598,13 @@ function Sales({ orders, onRefresh, showToast, isMobile }) {
   );
 }
 
-function OrderDetail({ detail, orderItems, loadingDetail, onClose, onDelete }) {
+function OrderDetail({ detail, orderItems, loadingDetail, onClose, onDelete, onInvoice }) {
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontWeight: 800, fontSize: 15, color: "#ee4181" }}>{detail.order_no}</div>
         <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={onInvoice} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>🧾 Invoice</button>
           <button onClick={onDelete} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>🗑️ Hapus</button>
           <button onClick={onClose} className="tap-btn" style={{ background: "#fde8f0", border: "none", cursor: "pointer", fontSize: 16, color: "#ee4181", borderRadius: 8, width: 30, height: 30 }}>×</button>
         </div>
