@@ -645,132 +645,100 @@ function InvoiceView({ invoice, onClose, isMobile }) {
 }
 
 // ─── INVENTORY ────────────────────────────────────────────────────────────────
+// ─── INLINE CELL ─────────────────────────────────────────────────────────────
+// Defined OUTSIDE Inventory so React never unmounts/remounts it on re-render
+function InlineCell({ val, isDirty, isActive, onActivate, onChange, onDeactivate, type="text", width, align="left", format, selectOpts }) {
+  if (isActive) {
+    if (selectOpts) return (
+      <select autoFocus value={val}
+        onChange={e => onChange(e.target.value)}
+        onBlur={onDeactivate}
+        style={{ width: width||"100%", padding: "4px 6px", border: "2px solid #2d4ba0", borderRadius: 6, fontSize: 13, background: "#fff" }}>
+        {selectOpts.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    );
+    return (
+      <input autoFocus type={type} value={val ?? ""}
+        onChange={e => onChange(e.target.value)}
+        onBlur={onDeactivate}
+        onKeyDown={e => { if(e.key==="Enter"||e.key==="Escape") { e.preventDefault(); onDeactivate(); } }}
+        style={{ width: width||"100%", padding: "4px 8px", border: "2px solid #2d4ba0", borderRadius: 6, fontSize: 13, textAlign: align, background: "#fff" }}
+      />
+    );
+  }
+  const displayVal = format ? format(val) : val;
+  return (
+    <div onClick={onActivate} title="Klik untuk edit"
+      style={{ cursor: "text", padding: "4px 6px", borderRadius: 6, minHeight: 28, display: "flex", alignItems: "center",
+        justifyContent: align==="right" ? "flex-end" : "flex-start",
+        background: isDirty ? "#fef9c3" : "transparent",
+        border: isDirty ? "1.5px dashed #f59e0b" : "1.5px solid transparent",
+        transition: "background 0.15s" }}>
+      {displayVal || <span style={{color:"#c8d2e0",fontSize:12}}>—</span>}
+    </div>
+  );
+}
+
 function Inventory({ items, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [filter, setFilter] = useState("all");
-  const [form, setForm] = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" });
+  const [editing, setEditing]   = useState(null);
+  const [filter, setFilter]     = useState("all");
+  const [form, setForm]         = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" });
   const [importing, setImporting] = useState(false);
-  const [selected, setSelected] = useState(new Set());
+  const [selected, setSelected]   = useState(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const fileInputRef = useRef(null);
 
-  const openNew = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" }); setEditing(null); setShowForm(true); };
-  const openEdit = (item) => { setForm({ ...item, price: item.price || "", cost: item.cost || "", stock: item.stock || "" }); setEditing(item.id); setShowForm(true); };
+  // ── Inline edit state ────────────────────────────────────────────────────
+  const [inlineEdits, setInlineEdits] = useState({});   // { [id]: { field: val, ... } }
+  const [activeCell, setActiveCell]   = useState(null); // { id, field }
+  const [bulkSaving, setBulkSaving]   = useState(false);
 
-  // ── EXPORT ke CSV (Harga Modal dulu, baru Harga Jual) ────────────────────
-  const exportExcel = () => {
-    const headers = ["Nama","Tipe","SKU","Harga Modal","Harga Jual","Stok","Satuan","Keterangan"];
-    const rows = items.map(i => [
-      i.name, i.type, i.sku||"", i.cost, i.price, i.stock, i.unit, i.description||""
-    ]);
-    const csv = [headers, ...rows]
-      .map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob(["\uFEFF"+csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `KURESAPI_Inventory_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    showToast("📥 Export CSV berhasil!");
-  };
+  const getVal = (item, field) =>
+    inlineEdits[item.id]?.[field] !== undefined ? inlineEdits[item.id][field] : item[field];
 
-  // ── BULK DELETE ───────────────────────────────────────────────────────────
-  const toggleSelect = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleSelectAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(i => i.id)));
-  };
-  const bulkDelete = async () => {
-    let ok = 0;
-    for (const id of selected) {
-      try { await api(`kr_items?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }); ok++; } catch {}
-    }
-    setSelected(new Set()); setConfirmBulk(false); onRefresh();
-    showToast(`🗑️ ${ok} item dihapus!`);
-  };
+  const setCell = (id, field, val) =>
+    setInlineEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: val } }));
 
-  // ── IMPORT dari CSV ───────────────────────────────────────────────────────
-  const handleImportFile = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    e.target.value = "";
-    setImporting(true);
-    try {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) { showToast("File kosong!", "error"); setImporting(false); return; }
+  const dirtyCount = Object.keys(inlineEdits).length;
 
-      // Parse CSV
-      const parseRow = (line) => {
-        const cols = []; let cur = ""; let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (c === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
-          else if (c === ',' && !inQ) { cols.push(cur.trim()); cur = ""; }
-          else cur += c;
-        }
-        cols.push(cur.trim());
-        return cols;
+  const bulkSave = async () => {
+    if (!dirtyCount) return;
+    setBulkSaving(true);
+    let ok = 0, fail = 0;
+    for (const [id, changes] of Object.entries(inlineEdits)) {
+      const orig = items.find(i => i.id === id);
+      if (!orig) continue;
+      const payload = {
+        ...orig,
+        ...changes,
+        price: Number(changes.price ?? orig.price) || 0,
+        cost:  Number(changes.cost  ?? orig.cost)  || 0,
+        stock: Number(changes.stock ?? orig.stock) || 0,
       };
-
-      const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/\s/g,""));
-      const idx = (keys) => {
-        for (const k of keys) {
-          const i = headers.indexOf(k.toLowerCase().replace(/\s/g,""));
-          if (i >= 0) return i;
-        }
-        return -1;
-      };
-
-      const iNama  = idx(["nama","name","itemname","namaitem","item name"]);
-      const iTipe  = idx(["tipe","type","kategori","category"]);
-      const iSKU   = idx(["sku","kode","itemid","item id"]);
-      const iHarga = idx(["hargajual","harga jual","price","harga"]);
-      const iModal = idx(["hargamodal","harga modal","cost","modal"]);
-      const iStok  = idx(["stok","stock","stocksisa","stock sisa","sisa"]);
-      const iSatuan= idx(["satuan","unit"]);
-      const iKet   = idx(["keterangan","description","notes","catatan"]);
-
-      if (iNama < 0) { showToast("Kolom 'Nama' tidak ditemukan!", "error"); setImporting(false); return; }
-
-      const toImport = lines.slice(1)
-        .map(l => parseRow(l))
-        .filter(cols => cols[iNama]?.trim())
-        .map(cols => {
-          const t = (cols[iTipe]||"product").toLowerCase();
-          return {
-            name:  cols[iNama]||"",
-            type:  t.includes("workshop") ? "workshop" : t.includes("equipment")||t.includes("perlengkapan") ? "equipment" : "product",
-            sku:   cols[iSKU]||"",
-            price: Number(cols[iHarga])||0,
-            cost:  Number(cols[iModal])||0,
-            stock: Number(cols[iStok])||0,
-            unit:  cols[iSatuan]||"pcs",
-            description: cols[iKet]||"",
-            is_active: true,
-          };
-        });
-
-      if (!toImport.length) { showToast("Tidak ada data valid!", "error"); setImporting(false); return; }
-
-      let success = 0, fail = 0;
-      for (const item of toImport) {
-        try { await api("kr_items", { method: "POST", body: JSON.stringify(item), prefer: "return=minimal" }); success++; }
-        catch { fail++; }
-      }
-      onRefresh();
-      showToast(`✨ Import selesai! ${success} item berhasil${fail>0?`, ${fail} gagal`:""}`);
-    } catch (err) {
-      showToast("Gagal import: " + err.message, "error");
+      try {
+        await api(`kr_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
+        ok++;
+      } catch { fail++; }
     }
-    setImporting(false);
+    setInlineEdits({});
+    setActiveCell(null);
+    onRefresh();
+    setBulkSaving(false);
+    showToast(fail ? `⚠️ ${ok} tersimpan, ${fail} gagal` : `✅ ${ok} item berhasil diperbarui!`);
   };
+
+  const discardEdits = () => { setInlineEdits({}); setActiveCell(null); };
+
+  // ── Detail form save ─────────────────────────────────────────────────────
+  const openNew  = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", description: "" }); setEditing(null); setShowForm(true); };
+  const openEdit = (item) => { setForm({ ...item, price: item.price||"", cost: item.cost||"", stock: item.stock||"" }); setEditing(item.id); setShowForm(true); };
 
   const save = async () => {
     if (!form.name.trim()) return showToast("Nama wajib diisi", "error");
     try {
-      const payload = { ...form, price: Number(form.price) || 0, cost: Number(form.cost) || 0, stock: Number(form.stock) || 0 };
+      const payload = { ...form, price: Number(form.price)||0, cost: Number(form.cost)||0, stock: Number(form.stock)||0 };
       if (editing) {
         await api(`kr_items?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
         showToast("✅ Item diperbarui!");
@@ -782,8 +750,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
-  const [confirmDelete, setConfirmDelete] = useState(null);
-
+  // ── Delete ───────────────────────────────────────────────────────────────
   const deleteItem = async (item) => {
     try {
       await api(`kr_items?id=eq.${item.id}`, { method: "DELETE", prefer: "return=minimal" });
@@ -791,35 +758,77 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
-  const filtered = items.filter(i => filter === "all" || i.type === filter);
-  const stats = { all: items.length, product: items.filter(x => x.type === "product").length, workshop: items.filter(x => x.type === "workshop").length, equipment: items.filter(x => x.type === "equipment").length };
+  // ── Bulk delete ──────────────────────────────────────────────────────────
+  const toggleSelect    = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleSelectAll = () => { if (selected.size === filtered.length) setSelected(new Set()); else setSelected(new Set(filtered.map(i => i.id))); };
+  const bulkDelete = async () => {
+    let ok = 0;
+    for (const id of selected) { try { await api(`kr_items?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }); ok++; } catch {} }
+    setSelected(new Set()); setConfirmBulk(false); onRefresh(); showToast(`🗑️ ${ok} item dihapus!`);
+  };
 
+  // ── Export ───────────────────────────────────────────────────────────────
+  const exportExcel = () => {
+    const headers = ["Nama","Tipe","SKU","Harga Modal","Harga Jual","Stok","Satuan","Keterangan"];
+    const rows = items.map(i => [i.name,i.type,i.sku||"",i.cost,i.price,i.stock,i.unit,i.description||""]);
+    const csv = [headers,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`KURESAPI_Inventory_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    showToast("📥 Export CSV berhasil!");
+  };
+
+  // ── Import ───────────────────────────────────────────────────────────────
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0]; if (!file) return; e.target.value = ""; setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(l=>l.trim());
+      if (lines.length < 2) { showToast("File kosong!","error"); setImporting(false); return; }
+      const parseRow = (line) => { const cols=[]; let cur=""; let inQ=false; for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ;}else if(c===','&&!inQ){cols.push(cur.trim());cur="";}else cur+=c;}cols.push(cur.trim());return cols;};
+      const headers = parseRow(lines[0]).map(h=>h.toLowerCase().replace(/\s/g,""));
+      const idx = (keys) => { for(const k of keys){const i=headers.indexOf(k.toLowerCase().replace(/\s/g,""));if(i>=0)return i;}return -1;};
+      const iNama=idx(["nama","name"]),iTipe=idx(["tipe","type","kategori"]),iSKU=idx(["sku","kode"]),iHarga=idx(["hargajual","price","harga"]),iModal=idx(["hargamodal","cost","modal"]),iStok=idx(["stok","stock"]),iSatuan=idx(["satuan","unit"]),iKet=idx(["keterangan","description"]);
+      if(iNama<0){showToast("Kolom 'Nama' tidak ditemukan!","error");setImporting(false);return;}
+      const toImport=lines.slice(1).map(l=>parseRow(l)).filter(c=>c[iNama]?.trim()).map(cols=>{const t=(cols[iTipe]||"product").toLowerCase();return{name:cols[iNama]||"",type:t.includes("workshop")?"workshop":t.includes("equipment")||t.includes("perlengkapan")?"equipment":"product",sku:cols[iSKU]||"",price:Number(cols[iHarga])||0,cost:Number(cols[iModal])||0,stock:Number(cols[iStok])||0,unit:cols[iSatuan]||"pcs",description:cols[iKet]||"",is_active:true};});
+      if(!toImport.length){showToast("Tidak ada data valid!","error");setImporting(false);return;}
+      let success=0,fail=0;
+      for(const item of toImport){try{await api("kr_items",{method:"POST",body:JSON.stringify(item),prefer:"return=minimal"});success++;}catch{fail++;}}
+      onRefresh(); showToast(`✨ Import selesai! ${success} berhasil${fail>0?`, ${fail} gagal`:""}`);
+    } catch(err){showToast("Gagal import: "+err.message,"error");}
+    setImporting(false);
+  };
+
+  const filtered = items.filter(i => filter === "all" || i.type === filter);
+  const stats = { all: items.length, product: items.filter(x=>x.type==="product").length, workshop: items.filter(x=>x.type==="workshop").length, equipment: items.filter(x=>x.type==="equipment").length };
+
+
+  // ── Detail form ──────────────────────────────────────────────────────────────
   if (showForm) return (
     <div style={{ maxWidth: 540 }}>
-      <div style={{ fontWeight: 800, fontSize: isMobile ? 17 : 20, marginBottom: 18, color: "#1a2a5e" }}>{editing ? "✏️ Edit Item" : "✨ Tambah Item Baru"}</div>
-      <div style={{ ...CARD, padding: isMobile ? 18 : 28, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: isMobile?17:20, marginBottom: 18, color: "#1a2a5e" }}>{editing ? "✏️ Edit Item" : "✨ Tambah Item Baru"}</div>
+      <div style={{ ...CARD, padding: isMobile?18:28, display: "flex", flexDirection: "column", gap: 14 }}>
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 7, fontWeight: 600 }}>Tipe Item *</label>
           <div style={{ display: "flex", gap: 7 }}>
-            {[["product", "📦 Produk"], ["workshop", "🎓 Workshop"], ["equipment", "🔧 Perlengkapan"]].map(([v, l]) => {
+            {[["product","📦 Produk"],["workshop","🎓 Workshop"],["equipment","🔧 Perlengkapan"]].map(([v,l]) => {
               const c = ITEM_COLORS[v];
-              return <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} className="tap-btn" style={{ flex: 1, padding: "10px 0", border: `2px solid ${form.type === v ? c.text : "#d4c8e0"}`, borderRadius: 10, background: form.type === v ? c.bg : "#fff", color: form.type === v ? c.text : "#7a8ab0", fontWeight: form.type === v ? 700 : 500, cursor: "pointer", fontSize: isMobile ? 11 : 12 }}>{l}</button>;
+              return <button key={v} onClick={() => setForm(f=>({...f,type:v}))} className="tap-btn" style={{ flex:1,padding:"10px 0",border:`2px solid ${form.type===v?c.text:"#d4c8e0"}`,borderRadius:10,background:form.type===v?c.bg:"#fff",color:form.type===v?c.text:"#7a8ab0",fontWeight:form.type===v?700:500,cursor:"pointer",fontSize:isMobile?11:12 }}>{l}</button>;
             })}
           </div>
         </div>
         {[["name","Nama *","text","Nama produk / workshop..."],["sku","SKU / Kode","text","Opsional"],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal","number","0"]].map(([k,l,t,ph]) => (
           <div key={k}>
-            <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>{l}</label>
-            <input type={t} placeholder={ph} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 15 }} />
+            <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>{l}</label>
+            <input type={t} placeholder={ph} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:15 }} />
           </div>
         ))}
         <div>
-          <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Keterangan</label>
-          <textarea rows={2} placeholder="Deskripsi opsional..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 14, resize: "vertical" }} />
+          <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>Keterangan</label>
+          <textarea rows={2} placeholder="Deskripsi opsional..." value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:14,resize:"vertical" }} />
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={save} className="tap-btn" style={{ flex: 1, padding: "14px 0", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 15 }}>{editing ? "💾 Simpan" : "✨ Tambah"}</button>
-          <button onClick={() => setShowForm(false)} className="tap-btn" style={{ flex: 1, padding: "14px 0", background: "#fff", color: "#1a2a5e", border: "1.5px solid #d4c8e0", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 15 }}>Batal</button>
+        <div style={{ display:"flex",gap:10 }}>
+          <button onClick={save} className="tap-btn" style={{ flex:1,padding:"14px 0",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer",fontSize:15 }}>{editing?"💾 Simpan":"✨ Tambah"}</button>
+          <button onClick={()=>setShowForm(false)} className="tap-btn" style={{ flex:1,padding:"14px 0",background:"#fff",color:"#1a2a5e",border:"1.5px solid #d4c8e0",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:15 }}>Batal</button>
         </div>
       </div>
     </div>
@@ -827,107 +836,203 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal title="Hapus Item?" message={`Hapus "${confirmDelete.name}" secara permanen dari database?`} onConfirm={() => deleteItem(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
-      {confirmBulk && <ConfirmModal title={`Hapus ${selected.size} Item?`} message={`Hapus ${selected.size} item yang dipilih secara permanen dari database?`} onConfirm={bulkDelete} onCancel={() => setConfirmBulk(false)} />}
+      {confirmDelete && <ConfirmModal title="Hapus Item?" message={`Hapus "${confirmDelete.name}" secara permanen?`} onConfirm={()=>deleteItem(confirmDelete)} onCancel={()=>setConfirmDelete(null)} />}
+      {confirmBulk  && <ConfirmModal title={`Hapus ${selected.size} Item?`} message={`Hapus ${selected.size} item yang dipilih secara permanen?`} onConfirm={bulkDelete} onCancel={()=>setConfirmBulk(false)} />}
 
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div style={{ ...CARD, padding: "10px 16px", marginBottom: 12, background: "#fde8f0", border: "1.5px solid #f5a8c4", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>✓ {selected.size} item dipilih</span>
-          <button onClick={() => setConfirmBulk(true)} className="tap-btn" style={{ padding: "6px 14px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🗑️ Hapus Terpilih</button>
-          <button onClick={() => setSelected(new Set())} className="tap-btn" style={{ padding: "6px 12px", background: "#fff", color: "#7a8ab0", border: "1.5px solid #d4c8e0", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Batal</button>
+      {/* ── Bulk SAVE bar ── */}
+      {dirtyCount > 0 && (
+        <div style={{ ...CARD, padding: "11px 16px", marginBottom: 12, background: "linear-gradient(135deg,#fef9c3,#fefce8)", border: "2px solid #f59e0b", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#92400e", flex: 1 }}>
+            ✏️ {dirtyCount} item memiliki perubahan yang belum disimpan
+          </span>
+          <button onClick={bulkSave} disabled={bulkSaving} className="tap-btn"
+            style={{ padding: "8px 18px", background: bulkSaving?"#ddd":"linear-gradient(135deg,#10b981,#059669)", color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, cursor: bulkSaving?"not-allowed":"pointer", fontSize: 13 }}>
+            {bulkSaving ? "⏳ Menyimpan..." : `💾 Simpan ${dirtyCount} Perubahan`}
+          </button>
+          <button onClick={discardEdits} className="tap-btn"
+            style={{ padding: "8px 14px", background: "#fff", color: "#7a8ab0", border: "1.5px solid #d4c8e0", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontSize: 13 }}>
+            ✕ Batalkan
+          </button>
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10 }}>
-        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, flex: 1 }}>
+      {/* ── Bulk DELETE bar ── */}
+      {selected.size > 0 && (
+        <div style={{ ...CARD, padding: "10px 16px", marginBottom: 12, background: "#fde8f0", border: "1.5px solid #f5a8c4", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>✓ {selected.size} item dipilih</span>
+          <button onClick={()=>setConfirmBulk(true)} className="tap-btn" style={{ padding:"6px 14px",background:"#ef4444",color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer",fontSize:13 }}>🗑️ Hapus Terpilih</button>
+          <button onClick={()=>setSelected(new Set())} className="tap-btn" style={{ padding:"6px 12px",background:"#fff",color:"#7a8ab0",border:"1.5px solid #d4c8e0",borderRadius:8,fontWeight:600,cursor:"pointer",fontSize:13 }}>Batal</button>
+        </div>
+      )}
+
+      {/* ── Toolbar ── */}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:8,flexWrap:"wrap" }}>
+        <div style={{ display:"flex",gap:6,overflowX:"auto",paddingBottom:4,flex:1 }}>
           {[["all","Semua"],["product","Produk"],["workshop","Workshop"],["equipment","Perlengkapan"]].map(([v,l]) => (
-            <button key={v} onClick={() => setFilter(v)} className="tap-btn" style={{ padding: "7px 12px", borderRadius: 20, border: `2px solid ${filter === v ? "#ee4181" : "#d4c8e0"}`, background: filter === v ? "#fde8f0" : "#fff", color: filter === v ? "#ee4181" : "#7a8ab0", fontWeight: filter === v ? 700 : 500, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>
-              {l} <span style={{ opacity: 0.7 }}>({stats[v]})</span>
+            <button key={v} onClick={()=>setFilter(v)} className="tap-btn" style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${filter===v?"#ee4181":"#d4c8e0"}`,background:filter===v?"#fde8f0":"#fff",color:filter===v?"#ee4181":"#7a8ab0",fontWeight:filter===v?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
+              {l} <span style={{opacity:0.7}}>({stats[v]})</span>
             </button>
           ))}
         </div>
-        <button onClick={openNew} className="tap-btn" style={{ padding: "9px 14px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>+ Tambah</button>
-        <button onClick={exportExcel} className="tap-btn" style={{ padding: "9px 14px", background: "#e4f3fd", color: "#2d4ba0", border: "1.5px solid #a1def9", borderRadius: 12, fontWeight: 600, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>📥 Export</button>
-        <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding: "9px 14px", background: "#fde8f0", color: "#ee4181", border: "1.5px solid #f5a8c4", borderRadius: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", fontSize: 13, flexShrink: 0 }}>
-          {importing ? "⏳ Import..." : "📤 Import CSV"}
+        <button onClick={openNew} className="tap-btn" style={{ padding:"9px 14px",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0 }}>+ Tambah</button>
+        <button onClick={exportExcel} className="tap-btn" style={{ padding:"9px 14px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:13,flexShrink:0 }}>📥 Export</button>
+        <button onClick={()=>fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding:"9px 14px",background:"#fde8f0",color:"#ee4181",border:"1.5px solid #f5a8c4",borderRadius:12,fontWeight:600,cursor:importing?"not-allowed":"pointer",fontSize:13,flexShrink:0 }}>
+          {importing?"⏳ Import...":"📤 Import CSV"}
         </button>
-        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{ display: "none" }} />
+        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{display:"none"}} />
       </div>
 
       {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#7a8ab0" }}>
-          <div style={{ fontSize: 48 }}>🌸</div>
-          <div style={{ fontWeight: 700, marginTop: 8 }}>Belum ada item</div>
-          <button onClick={openNew} className="tap-btn" style={{ marginTop: 12, padding: "11px 22px", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer" }}>Tambah Sekarang</button>
+        <div style={{ textAlign:"center",padding:"60px 0",color:"#7a8ab0" }}>
+          <div style={{fontSize:48}}>🌸</div>
+          <div style={{fontWeight:700,marginTop:8}}>Belum ada item</div>
+          <button onClick={openNew} className="tap-btn" style={{ marginTop:12,padding:"11px 22px",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer" }}>Tambah Sekarang</button>
         </div>
       ) : isMobile ? (
-        /* Mobile: card list */
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        /* ── Mobile: card list ── */
+        <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
           {filtered.map(item => {
             const c = ITEM_COLORS[item.type];
             const isSelected = selected.has(item.id);
+            const isDirtyRow = !!inlineEdits[item.id];
             return (
-              <div key={item.id} style={{ ...CARD, padding: 14, border: `1.5px solid ${isSelected ? "#ee4181" : "#d0e5f5"}`, background: isSelected ? "#fde8f0" : "#fff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: 1 }}>
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(item.id)}
-                      style={{ width: 18, height: 18, marginTop: 2, accentColor: "#ee4181", cursor: "pointer", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#1a2a5e", marginBottom: 4 }}>{item.name}</div>
-                      <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</span>
+              <div key={item.id} style={{ ...CARD,padding:14,border:`1.5px solid ${isDirtyRow?"#f59e0b":isSelected?"#ee4181":"#d0e5f5"}`,background:isDirtyRow?"#fef9c3":isSelected?"#fde8f0":"#fff" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8 }}>
+                  <div style={{ display:"flex",alignItems:"flex-start",gap:10,flex:1 }}>
+                    <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(item.id)} style={{ width:18,height:18,marginTop:2,accentColor:"#ee4181",cursor:"pointer",flexShrink:0 }} />
+                    <div style={{flex:1}}>
+                      <div style={{ fontSize:15,fontWeight:700,color:"#1a2a5e",marginBottom:4 }}>{item.name}</div>
+                      <span style={{ fontSize:11,padding:"3px 9px",borderRadius:20,background:c.bg,color:c.text,fontWeight:700 }}>{c.label}</span>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => openEdit(item)} className="tap-btn" style={{ padding: "6px 12px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️</button>
-                    <button onClick={() => setConfirmDelete(item)} className="tap-btn" style={{ padding: "6px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <button onClick={()=>openEdit(item)} className="tap-btn" style={{ padding:"6px 12px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600 }}>✏️ Detail</button>
+                    <button onClick={()=>setConfirmDelete(item)} className="tap-btn" style={{ padding:"6px 10px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12 }}>🗑️</button>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 12, fontSize: 13 }}>
-                  <div><span style={{ color: "#7a8ab0" }}>Jual: </span><b style={{ color: "#ee4181" }}>{formatRp(item.price)}</b></div>
-                  {item.type !== "workshop" && <div><span style={{ color: "#7a8ab0" }}>Stok: </span><b style={{ color: item.stock <= 5 ? "#ef4444" : "#10b981" }}>{item.stock} {item.unit}</b></div>}
-                  {item.sku && <div><span style={{ color: "#7a8ab0" }}>SKU: </span>{item.sku}</div>}
+                {/* Mobile inline fields */}
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:13 }}>
+                  <div>
+                    <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>💰 Harga Jual</div>
+                    <InlineCell val={getVal(item,"price")} isDirty={!!inlineEdits[item.id]?.price} isActive={activeCell?.id===item.id&&activeCell?.field==="price"} onActivate={()=>setActiveCell({id:item.id,field:"price"})} onChange={v=>setCell(item.id,"price",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📉 Modal</div>
+                    <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
+                  </div>
+                  {item.type !== "workshop" && (
+                    <div>
+                      <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📦 Stok</div>
+                      <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" />
+                    </div>
+                  )}
+                  <div>
+                    <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>SKU</div>
+                    <InlineCell val={getVal(item,"sku")} isDirty={!!inlineEdits[item.id]?.sku} isActive={activeCell?.id===item.id&&activeCell?.field==="sku"} onActivate={()=>setActiveCell({id:item.id,field:"sku"})} onChange={v=>setCell(item.id,"sku",v)} onDeactivate={()=>setActiveCell(null)} />
+                  </div>
                 </div>
+                {isDirtyRow && (
+                  <div style={{ marginTop:8,fontSize:11,color:"#92400e",fontWeight:600 }}>
+                    ✏️ Ada perubahan — simpan via tombol di atas
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       ) : (
-        /* Desktop: table */
-        <div style={{ ...CARD, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        /* ── Desktop: inline-editable table ── */
+        <div style={{ ...CARD, overflow: "auto" }}>
+          <div style={{ fontSize:12,color:"#7a8ab0",padding:"8px 14px 4px",display:"flex",alignItems:"center",gap:6 }}>
+            <span style={{background:"#fef9c3",border:"1px solid #f59e0b",borderRadius:4,padding:"2px 8px",color:"#92400e",fontWeight:600}}>✏️ Klik sel untuk edit langsung</span>
+            <span>· Tombol Detail untuk edit lengkap</span>
+          </div>
+          <table style={{ width:"100%",borderCollapse:"collapse" }}>
             <thead>
-              <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
-                <th style={{ padding: "12px 14px", width: 40 }}>
-                  <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleSelectAll}
-                    style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+              <tr style={{ background:"linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
+                <th style={{ padding:"12px 14px",width:40 }}>
+                  <input type="checkbox" checked={filtered.length>0&&selected.size===filtered.length} onChange={toggleSelectAll} style={{ width:16,height:16,accentColor:"#ee4181",cursor:"pointer" }} />
                 </th>
-                {["Nama","Tipe","SKU","Satuan","Harga Jual","Modal","Stok","Aksi"].map(h => (
-                  <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d4c8e0" }}>{h}</th>
+                {[
+                  { label:"Nama",      w:200 },
+                  { label:"Tipe",      w:120 },
+                  { label:"SKU",       w:100 },
+                  { label:"Satuan",    w:80  },
+                  { label:"Harga Jual",w:120 },
+                  { label:"Modal",     w:110 },
+                  { label:"Stok",      w:80  },
+                  { label:"Aksi",      w:130 },
+                ].map(({ label, w }) => (
+                  <th key={label} style={{ padding:"12px 8px",textAlign:"left",fontSize:12,color:"#1a2a5e",fontWeight:700,borderBottom:"2px solid #d4c8e0",minWidth:w }}>
+                    {label}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map(item => {
-                const c = ITEM_COLORS[item.type];
+                const c         = ITEM_COLORS[item.type];
                 const isSelected = selected.has(item.id);
+                const isDirtyRow = !!inlineEdits[item.id];
+                const curType   = getVal(item, "type");
                 return (
-                  <tr key={item.id} style={{ borderBottom: "1px solid #d4c8e0", background: isSelected ? "#fde8f0" : "transparent" }}>
-                    <td style={{ padding: "12px 14px" }}>
-                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(item.id)}
-                        style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+                  <tr key={item.id} style={{ borderBottom:"1px solid #d4c8e0", background: isDirtyRow?"#fefce8":isSelected?"#fde8f0":"transparent" }}>
+                    <td style={{ padding:"6px 14px" }}>
+                      <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(item.id)} style={{ width:16,height:16,accentColor:"#ee4181",cursor:"pointer" }} />
                     </td>
-                    <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 600 }}>{item.name}</td>
-                    <td style={{ padding: "12px 14px" }}><span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</span></td>
-                    <td style={{ padding: "12px 14px", fontSize: 13, color: "#7a8ab0" }}>{item.sku || "—"}</td>
-                    <td style={{ padding: "12px 14px", fontSize: 13 }}>{item.unit}</td>
-                    <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 700, color: "#ee4181" }}>{formatRp(item.price)}</td>
-                    <td style={{ padding: "12px 14px", fontSize: 13, color: "#7a8ab0" }}>{formatRp(item.cost)}</td>
-                    <td style={{ padding: "12px 14px", fontSize: 14, fontWeight: 700, color: item.stock <= 5 && item.type !== "workshop" ? "#ef4444" : "#10b981" }}>{item.type === "workshop" ? "—" : `${item.stock} ${item.unit}`}</td>
-                    <td style={{ padding: "12px 14px" }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => openEdit(item)} className="tap-btn" style={{ padding: "5px 12px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
-                        <button onClick={() => setConfirmDelete(item)} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️ Hapus</button>
+
+                    {/* Nama */}
+                    <td style={{ padding:"4px 8px",fontSize:14,fontWeight:600 }}>
+                      <InlineCell val={getVal(item,"name")} isDirty={!!inlineEdits[item.id]?.name} isActive={activeCell?.id===item.id&&activeCell?.field==="name"} onActivate={()=>setActiveCell({id:item.id,field:"name"})} onChange={v=>setCell(item.id,"name",v)} onDeactivate={()=>setActiveCell(null)} width={180} />
+                    </td>
+
+                    {/* Tipe */}
+                    <td style={{ padding:"4px 8px" }}>
+                      <InlineCell val={getVal(item,"type")} isDirty={!!inlineEdits[item.id]?.type} isActive={activeCell?.id===item.id&&activeCell?.field==="type"} onActivate={()=>setActiveCell({id:item.id,field:"type"})} onChange={v=>setCell(item.id,"type",v)} onDeactivate={()=>setActiveCell(null)}
+                        selectOpts={[["product","📦 Produk"],["workshop","🎓 Workshop"],["equipment","🔧 Perlengkapan"]]}
+                        format={v => { const col=ITEM_COLORS[v]||ITEM_COLORS.product; return <span style={{fontSize:11,padding:"3px 9px",borderRadius:20,background:col.bg,color:col.text,fontWeight:700}}>{col.label}</span>; }}
+                      />
+                    </td>
+
+                    {/* SKU */}
+                    <td style={{ padding:"4px 8px",fontSize:13,color:"#7a8ab0" }}>
+                      <InlineCell val={getVal(item,"sku")} isDirty={!!inlineEdits[item.id]?.sku} isActive={activeCell?.id===item.id&&activeCell?.field==="sku"} onActivate={()=>setActiveCell({id:item.id,field:"sku"})} onChange={v=>setCell(item.id,"sku",v)} onDeactivate={()=>setActiveCell(null)} width={90} />
+                    </td>
+
+                    {/* Satuan */}
+                    <td style={{ padding:"4px 8px",fontSize:13 }}>
+                      <InlineCell val={getVal(item,"unit")} isDirty={!!inlineEdits[item.id]?.unit} isActive={activeCell?.id===item.id&&activeCell?.field==="unit"} onActivate={()=>setActiveCell({id:item.id,field:"unit"})} onChange={v=>setCell(item.id,"unit",v)} onDeactivate={()=>setActiveCell(null)} width={70} />
+                    </td>
+
+                    {/* Harga Jual */}
+                    <td style={{ padding:"4px 8px" }}>
+                      <InlineCell val={getVal(item,"price")} isDirty={!!inlineEdits[item.id]?.price} isActive={activeCell?.id===item.id&&activeCell?.field==="price"} onActivate={()=>setActiveCell({id:item.id,field:"price"})} onChange={v=>setCell(item.id,"price",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={110}
+                        format={v => <span style={{fontWeight:700,color:"#ee4181"}}>{formatRp(Number(v)||0)}</span>}
+                      />
+                    </td>
+
+                    {/* Modal */}
+                    <td style={{ padding:"4px 8px" }}>
+                      <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={100}
+                        format={v => <span style={{color:"#7a8ab0"}}>{formatRp(Number(v)||0)}</span>}
+                      />
+                    </td>
+
+                    {/* Stok */}
+                    <td style={{ padding:"4px 8px" }}>
+                      {curType === "workshop"
+                        ? <span style={{color:"#d4c8e0",fontSize:13,paddingLeft:6}}>—</span>
+                        : <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={70}
+                            format={v => { const n=Number(v)||0; return <span style={{fontWeight:700,color:n<=5?"#ef4444":"#10b981"}}>{n}</span>; }}
+                          />
+                      }
+                    </td>
+
+                    {/* Aksi */}
+                    <td style={{ padding:"6px 8px" }}>
+                      <div style={{ display:"flex",gap:5 }}>
+                        <button onClick={()=>openEdit(item)} className="tap-btn" style={{ padding:"5px 10px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap" }}>✏️ Detail</button>
+                        <button onClick={()=>setConfirmDelete(item)} className="tap-btn" style={{ padding:"5px 9px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12 }}>🗑️</button>
                       </div>
                     </td>
                   </tr>
