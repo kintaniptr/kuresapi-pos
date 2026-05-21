@@ -481,10 +481,12 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
 
   const addToCart = (item) => {
     const itemVariants = variants.filter(v => v.item_id === item.id);
+    // Buka picker hanya kalau bundle_qty > 1 DAN variants sudah dibuat
     if ((item.bundle_qty || 1) > 1 && itemVariants.length > 0) {
       setVariantModal({ item });
       return;
     }
+    // Bundle tanpa variants / item biasa: langsung masuk keranjang
     setCart(c => {
       const ex = c.find(x => x.id === item.id);
       if (ex) return c.map(x => x.id === item.id ? { ...x, qty: x.qty + 1 } : x);
@@ -593,7 +595,8 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                 const c = ITEM_COLORS[item.type];
                 const bq = item.bundle_qty || 1;
                 const itemVariants = bq > 1 ? variants.filter(v => v.item_id === item.id) : [];
-                const totalStock = itemVariants.length > 0
+                const hasVariants = itemVariants.length > 0;
+                const totalStock = hasVariants
                   ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
                   : (item.stock || 0);
                 const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor(totalStock / bq);
@@ -603,7 +606,12 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                     <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, display: "inline-block", marginBottom: 6, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, color: "#1a2a5e" }}>{item.name}</div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
-                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : bq > 1 ? `Sisa ${bundlesLeft} bundle` : `Stok: ${totalStock}`}</div>}
+                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>
+                      {outOfStock ? "❌ Habis"
+                        : bq > 1 && !hasVariants ? <span style={{color:"#f59e0b"}}>⚙️ Setup desain dulu</span>
+                        : bq > 1 ? `Sisa ${bundlesLeft} bundle`
+                        : `Stok: ${totalStock}`}
+                    </div>}
                   </button>
                 );
               })}
@@ -643,7 +651,8 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                   const c = ITEM_COLORS[item.type];
                   const bq = item.bundle_qty || 1;
                   const itemVariants = bq > 1 ? variants.filter(v => v.item_id === item.id) : [];
-                  const totalStock = itemVariants.length > 0
+                  const hasVariants = itemVariants.length > 0;
+                  const totalStock = hasVariants
                     ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
                     : (item.stock || 0);
                   const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor(totalStock / bq);
@@ -653,7 +662,12 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                       <div style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, display: "inline-block", marginBottom: 8, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, lineHeight: 1.35, color: "#1a2a5e" }}>{item.name}</div>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
-                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : bq > 1 ? (bundlesLeft <= 3 ? `⚠️ Sisa ${bundlesLeft} bundle` : `📦 Sisa ${bundlesLeft} bundle`) : `📦 Stok: ${totalStock}`}</div>}
+                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>
+                        {outOfStock ? "❌ Habis"
+                          : bq > 1 && !hasVariants ? <span style={{color:"#f59e0b"}}>⚙️ Setup desain dulu</span>
+                          : bq > 1 ? (bundlesLeft <= 3 ? `⚠️ Sisa ${bundlesLeft} bundle` : `📦 Sisa ${bundlesLeft} bundle`)
+                          : `📦 Stok: ${totalStock}`}
+                      </div>}
                     </button>
                   );
                 })}
