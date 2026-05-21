@@ -1081,7 +1081,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState(null);
   const [filter, setFilter]     = useState("all");
-  const [sortInv, setSortInv]   = useState({ key: "name", dir: 1 }); // key: name|price|stock, dir: 1=asc -1=desc
+  const [sortInv, setSortInv]   = useState({ key: "created_at", dir: -1 }); // default: newest first
   const [form, setForm]         = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", bundle_qty: 1, description: "" });
   const [importing, setImporting] = useState(false);
   const [selected, setSelected]   = useState(new Set());
@@ -1382,18 +1382,13 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
       )}
 
       {/* ── Toolbar ── */}
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:8,flexWrap:"wrap" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap" }}>
         <div style={{ display:"flex",gap:6,overflowX:"auto",paddingBottom:4,flex:1 }}>
           {[["all","Semua"],["product","Produk"],["workshop","Workshop"],["equipment","Perlengkapan"],["low","⚠️ Hampir Habis"],["out","❌ Habis"]].map(([v,l]) => (
             <button key={v} onClick={()=>setFilter(v)} className="tap-btn" style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${filter===v?(v==="out"?"#ef4444":v==="low"?"#f59e0b":"#ee4181"):"#d4c8e0"}`,background:filter===v?(v==="out"?"#fee2e2":v==="low"?"#fef9c3":"#fde8f0"):"#fff",color:filter===v?(v==="out"?"#ef4444":v==="low"?"#92400e":"#ee4181"):"#7a8ab0",fontWeight:filter===v?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
               {l} <span style={{opacity:0.7}}>({stats[v]||0})</span>
             </button>
           ))}
-          {/* Quick sort: Terbaru */}
-          <button onClick={()=>setSortInv(s=> s.key==="created_at" ? {key:"created_at",dir:-s.dir} : {key:"created_at",dir:-1})} className="tap-btn"
-            style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${sortInv.key==="created_at"?"#2d4ba0":"#d4c8e0"}`,background:sortInv.key==="created_at"?"#e4f3fd":"#fff",color:sortInv.key==="created_at"?"#2d4ba0":"#7a8ab0",fontWeight:sortInv.key==="created_at"?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
-            📅 Terbaru{sortInv.key==="created_at"?(sortInv.dir===-1?" ↓":" ↑"):""}
-          </button>
         </div>
         <button onClick={openNew} className="tap-btn" style={{ padding:"9px 14px",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0 }}>+ Tambah</button>
         <button onClick={exportExcel} className="tap-btn" style={{ padding:"9px 14px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:13,flexShrink:0 }}>📥 Export</button>
@@ -1401,6 +1396,29 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
           {importing?"⏳ Import...":"📤 Import CSV"}
         </button>
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{display:"none"}} />
+      </div>
+
+      {/* ── Sort bar ── */}
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"8px 12px",background:"#f8faff",borderRadius:10,border:"1.5px solid #d0e5f5",flexWrap:"wrap" }}>
+        <span style={{ fontSize:12,fontWeight:700,color:"#7a8ab0",flexShrink:0 }}>Urut:</span>
+        {[
+          { key:"created_at", labelAsc:"📅 Terlama",   labelDesc:"📅 Terbaru"  },
+          { key:"name",       labelAsc:"🔤 A → Z",     labelDesc:"🔤 Z → A"    },
+          { key:"price",      labelAsc:"💰 Termurah",  labelDesc:"💰 Termahal" },
+          { key:"stock",      labelAsc:"📦 Stok ↑",    labelDesc:"📦 Stok ↓"   },
+          { key:"type",       labelAsc:"🏷️ Tipe A–Z",  labelDesc:"🏷️ Tipe Z–A" },
+        ].map(({ key, labelAsc, labelDesc }) => {
+          const isActive = sortInv.key === key;
+          const label = isActive ? (sortInv.dir === -1 ? labelDesc : labelAsc) : labelDesc.replace(/↑|↓/g,"").trim();
+          return (
+            <button key={key}
+              onClick={() => setSortInv(s => s.key === key ? { key, dir: -s.dir } : { key, dir: -1 })}
+              className="tap-btn"
+              style={{ padding:"5px 11px",borderRadius:20,border:`2px solid ${isActive?"#2d4ba0":"#d0e5f5"}`,background:isActive?"#e4f3fd":"#fff",color:isActive?"#2d4ba0":"#7a8ab0",fontWeight:isActive?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap" }}>
+              {isActive ? label : labelDesc.replace(/[↑↓]/g,"").trim()}{isActive ? (sortInv.dir===-1?" ↓":" ↑") : ""}
+            </button>
+          );
+        })}
       </div>
 
       {filtered.length === 0 ? (
@@ -2028,13 +2046,33 @@ function Sales({ orders, items, onRefresh, showToast, isMobile }) {
       </div>
 
       {/* Stat Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16, marginBottom: 12 }}>
         {statCards.map(s => (
           <div key={s.label} style={{ ...CARD, padding: isMobile ? "12px 14px" : "18px 20px", borderTop: `4px solid ${s.accent}` }}>
             <div style={{ fontSize: isMobile ? 11 : 12, color: "#7a8ab0", marginBottom: 5, fontWeight: 600 }}>{s.icon} {s.label}</div>
             <div style={{ fontSize: isMobile ? 15 : 20, fontWeight: 800, color: s.accent }}>{s.value}</div>
           </div>
         ))}
+      </div>
+
+      {/* Sort bar */}
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"8px 12px",background:"#f8faff",borderRadius:10,border:"1.5px solid #d0e5f5",flexWrap:"wrap" }}>
+        <span style={{ fontSize:12,fontWeight:700,color:"#7a8ab0",flexShrink:0 }}>Urut:</span>
+        {[
+          { key:"created_at", labelDesc:"📅 Terbaru", labelAsc:"📅 Terlama" },
+          { key:"total",      labelDesc:"💰 Terbesar", labelAsc:"💰 Terkecil" },
+          { key:"customer",   labelDesc:"🔤 Z → A",   labelAsc:"🔤 A → Z"    },
+        ].map(({ key, labelDesc, labelAsc }) => {
+          const isActive = sortSales.key === key;
+          return (
+            <button key={key}
+              onClick={() => setSortSales(s => s.key === key ? { key, dir: -s.dir } : { key, dir: -1 })}
+              className="tap-btn"
+              style={{ padding:"5px 11px",borderRadius:20,border:`2px solid ${isActive?"#2d4ba0":"#d0e5f5"}`,background:isActive?"#e4f3fd":"#fff",color:isActive?"#2d4ba0":"#7a8ab0",fontWeight:isActive?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap" }}>
+              {isActive ? (sortSales.dir===-1 ? labelDesc : labelAsc) : labelDesc}{isActive ? (sortSales.dir===-1?" ↓":" ↑") : ""}
+            </button>
+          );
+        })}
       </div>
 
       {isMobile ? (
@@ -2541,7 +2579,7 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
       </div>
 
       {/* Filter + Add */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: 1 }}>
           {[["all","Semua"],["unpaid","⏳ Belum Dibayar"],["paid","✅ Sudah Dibayar"]].map(([v,l]) => (
             <button key={v} onClick={() => setFilterStatus(v)} className="tap-btn" style={{
@@ -2561,6 +2599,13 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
           </button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} style={{ display: "none" }} />
         </div>
+      </div>
+
+      {/* Sort bar */}
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"8px 12px",background:"#f8faff",borderRadius:10,border:"1.5px solid #d0e5f5",flexWrap:"wrap" }}>
+        <span style={{ fontSize:12,fontWeight:700,color:"#7a8ab0",flexShrink:0 }}>Urut:</span>
+        <span style={{ fontSize:12,padding:"4px 11px",borderRadius:20,background:"#e4f3fd",color:"#2d4ba0",fontWeight:700,border:"2px solid #2d4ba0" }}>📅 Terbaru ↓</span>
+        <span style={{ fontSize:11,color:"#7a8ab0" }}>— data diurutkan dari yang paling baru ditambahkan</span>
       </div>
 
       {/* List */}
