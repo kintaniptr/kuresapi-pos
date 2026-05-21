@@ -1723,14 +1723,25 @@ function StockMoveForm({ items, onSave, onCancel, showCancel }) {
 }
 
 function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm]       = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [selectedMoves, setSelectedMoves] = useState(new Set());
+  const [confirmBulkMoves, setConfirmBulkMoves] = useState(false);
 
   const deleteMove = async (move) => {
     try {
       await api(`kr_stock_moves?id=eq.${move.id}`, { method: "DELETE", prefer: "return=minimal" });
       showToast("🗑️ Mutasi dihapus!"); setConfirmDelete(null); onRefresh();
     } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const bulkDeleteMoves = async () => {
+    let ok = 0;
+    for (const id of selectedMoves) {
+      try { await api(`kr_stock_moves?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }); ok++; } catch {}
+    }
+    setSelectedMoves(new Set()); setConfirmBulkMoves(false); onRefresh();
+    showToast(`🗑️ ${ok} mutasi dihapus!`);
   };
 
   const handleSave = async (form) => {
@@ -1740,8 +1751,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
       const newStock = form.direction === "in" ? (item.stock || 0) + qty : Math.max(0, (item.stock || 0) - qty);
       await api("kr_stock_moves", { method: "POST", body: JSON.stringify({ ...form, qty }), prefer: "return=minimal" });
       await api(`kr_items?id=eq.${form.item_id}`, { method: "PATCH", body: JSON.stringify({ stock: newStock }), prefer: "return=minimal" });
-      setShowForm(false);
-      onRefresh();
+      setShowForm(false); onRefresh();
       showToast(`${form.direction === "in" ? "📥 Stok masuk" : "📤 Stok keluar"} dicatat!`);
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
@@ -1751,6 +1761,16 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
   return (
     <div>
       {confirmDelete && <ConfirmModal title="Hapus Mutasi?" message="Hapus catatan mutasi ini dari database? Stok tidak akan otomatis dikembalikan." onConfirm={() => deleteMove(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmBulkMoves && <ConfirmModal title={`Hapus ${selectedMoves.size} Mutasi?`} message="Catatan mutasi dihapus. Stok tidak otomatis dikembalikan." onConfirm={bulkDeleteMoves} onCancel={() => setConfirmBulkMoves(false)} danger />}
+
+      {/* Bulk bar */}
+      {selectedMoves.size > 0 && (
+        <div style={{ ...CARD, padding:"10px 16px", marginBottom:12, background:"#fde8f0", border:"1.5px solid #f5a8c4", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ fontSize:13, fontWeight:700, color:"#ee4181" }}>✓ {selectedMoves.size} mutasi dipilih</span>
+          <button onClick={() => setConfirmBulkMoves(true)} className="tap-btn" style={{ padding:"6px 14px", background:"#ef4444", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer", fontSize:13 }}>🗑️ Hapus Terpilih</button>
+          <button onClick={() => setSelectedMoves(new Set())} className="tap-btn" style={{ padding:"6px 12px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:8, fontWeight:600, cursor:"pointer", fontSize:13 }}>Batal</button>
+        </div>
+      )}
 
       {isMobile ? (
         /* ── Mobile: form toggle ── */
@@ -1767,7 +1787,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
             </div>
           )}
           <div style={{ fontWeight:700, fontSize:15, marginBottom:10, color:"#1a2a5e" }}>📋 Riwayat Mutasi</div>
-          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} />
+          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} selected={selectedMoves} setSelected={setSelectedMoves} />
         </>
       ) : (
         /* ── Desktop: side-by-side, form always visible ── */
@@ -1778,7 +1798,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
           </div>
           <div>
             <div style={{ fontWeight:800, fontSize:17, marginBottom:14, color:"#1a2a5e" }}>📋 Riwayat</div>
-            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} />
+            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} selected={selectedMoves} setSelected={setSelectedMoves} />
           </div>
         </div>
       )}
@@ -1786,7 +1806,10 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
   );
 }
 
-function MovesList({ moves, itemMap, isMobile, onDelete }) {
+function MovesList({ moves, itemMap, isMobile, onDelete, selected, setSelected }) {
+  const toggle = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => setSelected(s => s.size === moves.length ? new Set() : new Set(moves.map(m => m.id)));
+
   if (moves.length === 0) return (
     <div style={{ ...CARD, padding: 40, textAlign: "center", color: "#7a8ab0" }}>
       <div style={{ fontSize: 36 }}>📋</div>Belum ada mutasi stok
@@ -1794,19 +1817,23 @@ function MovesList({ moves, itemMap, isMobile, onDelete }) {
   );
   if (isMobile) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {moves.map(m => (
-        <div key={m.id} style={{ ...CARD, padding: 12, display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 24 }}>{m.direction === "in" ? "📥" : "📤"}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{itemMap[m.item_id]?.name || "—"}</div>
-            <div style={{ fontSize: 11, color: "#7a8ab0" }}>{formatDate(m.created_at)} · {m.note || "—"}</div>
+      {moves.map(m => {
+        const isSel = selected.has(m.id);
+        return (
+          <div key={m.id} style={{ ...CARD, padding: 12, display: "flex", alignItems: "center", gap: 10, background: isSel ? "#fde8f0" : "#fff", border: `1.5px solid ${isSel ? "#f5a8c4" : "#d4c8e0"}` }}>
+            <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:17, height:17, accentColor:"#ee4181", cursor:"pointer", flexShrink:0 }} />
+            <span style={{ fontSize: 22 }}>{m.direction === "in" ? "📥" : "📤"}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{itemMap[m.item_id]?.name || "—"}</div>
+              <div style={{ fontSize: 11, color: "#7a8ab0" }}>{formatDate(m.created_at)} · {m.note || "—"}</div>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444", flexShrink: 0 }}>
+              {m.direction === "in" ? "+" : "−"}{m.qty}
+            </div>
+            <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "6px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>🗑️</button>
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444", flexShrink: 0 }}>
-            {m.direction === "in" ? "+" : "−"}{m.qty}
-          </div>
-          <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "6px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>🗑️</button>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
   return (
@@ -1814,26 +1841,36 @@ function MovesList({ moves, itemMap, isMobile, onDelete }) {
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
+            <th style={{ padding:"11px 14px", width:40 }}>
+              <input type="checkbox" checked={moves.length > 0 && selected.size === moves.length} onChange={toggleAll}
+                style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
+            </th>
             {["Waktu","Item","Arah","Qty","Keterangan",""].map(h => (
-              <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d4c8e0" }}>{h}</th>
+              <th key={h} style={{ padding: "11px 8px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d4c8e0" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {moves.map(m => (
-            <tr key={m.id} style={{ borderBottom: "1px solid #d4c8e0" }}>
-              <td style={{ padding: "10px 14px", fontSize: 12, color: "#7a8ab0" }}>{formatDate(m.created_at)}</td>
-              <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600 }}>{itemMap[m.item_id]?.name || "—"}</td>
-              <td style={{ padding: "10px 14px" }}>
-                <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: m.direction === "in" ? "#d1fae5" : "#fee2e2", color: m.direction === "in" ? "#10b981" : "#ef4444" }}>{m.direction === "in" ? "📥 Masuk" : "📤 Keluar"}</span>
-              </td>
-              <td style={{ padding: "10px 14px", fontSize: 15, fontWeight: 800 }}>{m.qty}</td>
-              <td style={{ padding: "10px 14px", fontSize: 13, color: "#7a8ab0" }}>{m.note || "—"}</td>
-              <td style={{ padding: "10px 14px" }}>
-                <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 10px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️ Hapus</button>
-              </td>
-            </tr>
-          ))}
+          {moves.map(m => {
+            const isSel = selected.has(m.id);
+            return (
+              <tr key={m.id} style={{ borderBottom: "1px solid #d4c8e0", background: isSel ? "#fde8f0" : "transparent" }}>
+                <td style={{ padding:"8px 14px" }}>
+                  <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
+                </td>
+                <td style={{ padding: "10px 8px", fontSize: 12, color: "#7a8ab0" }}>{formatDate(m.created_at)}</td>
+                <td style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600 }}>{itemMap[m.item_id]?.name || "—"}</td>
+                <td style={{ padding: "10px 8px" }}>
+                  <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: m.direction === "in" ? "#d1fae5" : "#fee2e2", color: m.direction === "in" ? "#10b981" : "#ef4444" }}>{m.direction === "in" ? "📥 Masuk" : "📤 Keluar"}</span>
+                </td>
+                <td style={{ padding: "10px 8px", fontSize: 15, fontWeight: 800 }}>{m.qty}</td>
+                <td style={{ padding: "10px 8px", fontSize: 13, color: "#7a8ab0" }}>{m.note || "—"}</td>
+                <td style={{ padding: "8px 8px" }}>
+                  <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 9px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -2170,6 +2207,15 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
     showToast(`🗑️ ${ok} item dihapus!`);
   };
 
+  const bulkToggleStatus = async (newStatus) => {
+    let ok = 0;
+    for (const id of selected) {
+      try { await api(`kr_reimbursements?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus }), prefer: "return=minimal" }); ok++; } catch {}
+    }
+    setSelected(new Set()); onRefresh();
+    showToast(newStatus === "paid" ? `✅ ${ok} item ditandai lunas!` : `↩️ ${ok} item ditandai belum dibayar`);
+  };
+
   // ── EXPORT ────────────────────────────────────────────────────────────────
   const exportCSV = () => {
     const headers = ["Expense Details","Event","Jumlah","PIC","Status","Tanggal","Catatan"];
@@ -2381,17 +2427,36 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
         </div>
       )}
 
-      {/* Bulk DELETE bar */}
+      {/* Bulk DELETE + TOTAL + STATUS bar */}
       {selected.size > 0 && (() => {
         const selectedTotal = reimburses.filter(r => selected.has(r.id)).reduce((s, r) => s + (r.amount||0), 0);
+        const allPaid   = reimburses.filter(r => selected.has(r.id)).every(r => r.status === "paid");
+        const allUnpaid = reimburses.filter(r => selected.has(r.id)).every(r => r.status === "unpaid");
         return (
-          <div style={{ ...CARD, padding:"10px 16px", marginBottom:12, background:"#fde8f0", border:"1.5px solid #f5a8c4", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-            <div style={{ flex:1 }}>
-              <span style={{ fontSize:13, fontWeight:700, color:"#ee4181" }}>✓ {selected.size} item dipilih</span>
-              <span style={{ fontSize:13, color:"#ee4181", marginLeft:8 }}>· Total: <b>{formatRp(selectedTotal)}</b></span>
-            </div>
-            <button onClick={() => setConfirmBulk(true)} className="tap-btn" style={{ padding:"6px 14px", background:"#ef4444", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer", fontSize:13 }}>🗑️ Hapus Terpilih</button>
-            <button onClick={() => setSelected(new Set())} className="tap-btn" style={{ padding:"6px 12px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d0e5f5", borderRadius:8, fontWeight:600, cursor:"pointer", fontSize:13 }}>Batal</button>
+          <div style={{ ...CARD, padding:"11px 16px", marginBottom:12, background:"#fde8f0", border:"1.5px solid #f5a8c4", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ fontSize:13, fontWeight:700, color:"#ee4181" }}>✓ {selected.size} dipilih</span>
+            <span style={{ fontSize:13, fontWeight:800, color:"#1a2a5e", background:"#fff", borderRadius:8, padding:"3px 12px", border:"1.5px solid #f5a8c4" }}>{formatRp(selectedTotal)}</span>
+            <div style={{ flex:1 }} />
+            {!allPaid && (
+              <button onClick={() => bulkToggleStatus("paid")} className="tap-btn"
+                style={{ padding:"6px 14px", background:"#d1fae5", color:"#10b981", border:"1.5px solid #10b981", borderRadius:8, fontWeight:700, cursor:"pointer", fontSize:13 }}>
+                ✅ Tandai Lunas
+              </button>
+            )}
+            {!allUnpaid && (
+              <button onClick={() => bulkToggleStatus("unpaid")} className="tap-btn"
+                style={{ padding:"6px 14px", background:"#fef3c7", color:"#f59e0b", border:"1.5px solid #f59e0b", borderRadius:8, fontWeight:700, cursor:"pointer", fontSize:13 }}>
+                ↩️ Belum Dibayar
+              </button>
+            )}
+            <button onClick={() => setConfirmBulk(true)} className="tap-btn"
+              style={{ padding:"6px 14px", background:"#ef4444", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer", fontSize:13 }}>
+              🗑️ Hapus
+            </button>
+            <button onClick={() => setSelected(new Set())} className="tap-btn"
+              style={{ padding:"6px 12px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d0e5f5", borderRadius:8, fontWeight:600, cursor:"pointer", fontSize:13 }}>
+              Batal
+            </button>
           </div>
         );
       })()}
