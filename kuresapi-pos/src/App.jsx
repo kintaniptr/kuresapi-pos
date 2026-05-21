@@ -1659,6 +1659,57 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
 }
 
 // ─── STOCK MOVES ──────────────────────────────────────────────────────────────
+// ─── STOCK MOVE FORM ─────────────────────────────────────────────────────────
+function StockMoveForm({ form, setForm, items, saving, onSave, onCancel, showCancel }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        {[["in","📥 Masuk"],["out","📤 Keluar"]].map(([v,l]) => (
+          <button key={v} onClick={() => setForm(f => ({ ...f, direction: v }))} className="tap-btn"
+            style={{ flex:1, padding:"11px 0", border:`2px solid ${form.direction===v?(v==="in"?"#10b981":"#ef4444"):"#d4c8e0"}`, borderRadius:10,
+              background:form.direction===v?(v==="in"?"#d1fae5":"#fee2e2"):"#fff",
+              color:form.direction===v?(v==="in"?"#10b981":"#ef4444"):"#7a8ab0",
+              fontWeight:form.direction===v?700:500, cursor:"pointer", fontSize:14 }}>{l}</button>
+        ))}
+      </div>
+      <div>
+        <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Item *</label>
+        <select value={form.item_id} onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))}
+          style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:14 }}>
+          <option value="">— Pilih item —</option>
+          {items.filter(i => i.type !== "workshop").map(i => (
+            <option key={i.id} value={i.id}>{i.name} (stok: {i.stock})</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Jumlah *</label>
+        <input type="number" min={1} placeholder="0" value={form.qty}
+          onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
+          style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:15 }} />
+      </div>
+      <div>
+        <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Keterangan</label>
+        <input placeholder="Contoh: Restock dari supplier..." value={form.note}
+          onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+          style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:14 }} />
+      </div>
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={onSave} disabled={saving} className="tap-btn"
+          style={{ flex:1, padding:"13px 0", background:saving?"#ddd":"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:12, fontWeight:700, cursor:saving?"not-allowed":"pointer", fontSize:15 }}>
+          {saving ? "⏳ Menyimpan..." : "💾 Simpan"}
+        </button>
+        {showCancel && (
+          <button onClick={onCancel} className="tap-btn"
+            style={{ padding:"13px 16px", background:"#fff", color:"#1a2a5e", border:"1.5px solid #d4c8e0", borderRadius:12, fontWeight:600, cursor:"pointer" }}>
+            Batal
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
   const [form, setForm] = useState({ item_id: "", direction: "in", qty: "", note: "" });
   const [saving, setSaving] = useState(false);
@@ -1691,33 +1742,6 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
 
   const itemMap = Object.fromEntries(items.map(i => [i.id, i]));
 
-  const FormContent = () => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        {[["in","📥 Masuk"],["out","📤 Keluar"]].map(([v,l]) => (
-          <button key={v} onClick={() => setForm(f => ({ ...f, direction: v }))} className="tap-btn" style={{ flex: 1, padding: "11px 0", border: `2px solid ${form.direction===v?(v==="in"?"#10b981":"#ef4444"):"#d4c8e0"}`, borderRadius: 10, background: form.direction===v?(v==="in"?"#d1fae5":"#fee2e2"):"#fff", color: form.direction===v?(v==="in"?"#10b981":"#ef4444"):"#7a8ab0", fontWeight: form.direction===v?700:500, cursor: "pointer", fontSize: 14 }}>{l}</button>
-        ))}
-      </div>
-      {[
-        [<><label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Item *</label><select value={form.item_id} onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))} style={{ width: "100%", padding: "11px 12px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 14 }}><option value="">— Pilih item —</option>{items.filter(i => i.type !== "workshop").map(i => <option key={i.id} value={i.id}>{i.name} (stok: {i.stock})</option>)}</select></>, "sel"],
-      ].map(([el, k]) => <div key={k}>{el}</div>)}
-      <div>
-        <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Jumlah *</label>
-        <input type="number" min={1} placeholder="0" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))} style={{ width: "100%", padding: "11px 12px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 15 }} />
-      </div>
-      <div>
-        <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Keterangan</label>
-        <input placeholder="Contoh: Restock dari supplier..." value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} style={{ width: "100%", padding: "11px 12px", border: "1.5px solid #d4c8e0", borderRadius: 10, fontSize: 14 }} />
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={save} disabled={saving} className="tap-btn" style={{ flex: 1, padding: "13px 0", background: saving ? "#ddd" : "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", fontSize: 15 }}>
-          {saving ? "⏳ Menyimpan..." : "💾 Simpan"}
-        </button>
-        {isMobile && <button onClick={() => setShowForm(false)} className="tap-btn" style={{ padding: "13px 16px", background: "#fff", color: "#1a2a5e", border: "1.5px solid #d4c8e0", borderRadius: 12, fontWeight: 600, cursor: "pointer" }}>Batal</button>}
-      </div>
-    </div>
-  );
-
   return (
     <div>
       {confirmDelete && <ConfirmModal title="Hapus Mutasi?" message={`Hapus catatan mutasi ini dari database? Stok tidak akan otomatis dikembalikan.`} onConfirm={() => deleteMove(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
@@ -1727,7 +1751,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
           {showForm && (
             <div style={{ ...CARD, padding: 18, marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14, color: "#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
-              <FormContent />
+              <StockMoveForm form={form} setForm={setForm} items={items} saving={saving} onSave={save} onCancel={() => setShowForm(false)} showCancel={isMobile} />
             </div>
           )}
         </>
@@ -1735,7 +1759,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
         <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 24 }}>
           <div style={{ ...CARD, padding: 22, height: "fit-content" }}>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 18, color: "#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
-            <FormContent />
+            <StockMoveForm form={form} setForm={setForm} items={items} saving={saving} onSave={save} onCancel={() => setShowForm(false)} showCancel={isMobile} />
           </div>
           <div>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14, color: "#1a2a5e" }}>📋 Riwayat</div>
