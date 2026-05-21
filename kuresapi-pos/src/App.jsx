@@ -382,6 +382,81 @@ function LoginScreen({ onLogin, isMobile }) {
 }
 
 // ─── POS ──────────────────────────────────────────────────────────────────────
+// ─── VARIANT PICKER MODAL ────────────────────────────────────────────────────
+function VariantPickerModal({ item, variants, onConfirm, onCancel }) {
+  const bq = item.bundle_qty || 1;
+  const [counts, setCounts] = useState({}); // { variantId: qty }
+  const total = Object.values(counts).reduce((s, n) => s + n, 0);
+  const remaining = bq - total;
+
+  const inc = (id) => {
+    if (remaining <= 0) return;
+    setCounts(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  };
+  const dec = (id) => {
+    if (!counts[id]) return;
+    setCounts(c => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
+  };
+
+  const confirm = () => {
+    if (remaining !== 0) return;
+    const selected = variants
+      .filter(v => counts[v.id] > 0)
+      .flatMap(v => Array(counts[v.id]).fill({ id: v.id, name: v.name }));
+    onConfirm(selected);
+  };
+
+  return (
+    <div style={{ position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:20,padding:24,width:"100%",maxWidth:420,maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)" }}>
+        <div style={{ fontWeight:800,fontSize:17,color:"#1a2a5e",marginBottom:4 }}>🎨 Pilih Desain</div>
+        <div style={{ fontSize:13,color:"#7a8ab0",marginBottom:16 }}>
+          {item.name} — pilih <b>{bq} desain</b>
+          {remaining > 0
+            ? <span style={{ marginLeft:8,background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"2px 8px",fontWeight:700 }}>{remaining} lagi</span>
+            : <span style={{ marginLeft:8,background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"2px 8px",fontWeight:700 }}>✓ Lengkap!</span>
+          }
+        </div>
+
+        <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:20 }}>
+          {variants.map(v => {
+            const cnt = counts[v.id] || 0;
+            const stockOk = v.stock > cnt;
+            return (
+              <div key={v.id} style={{ display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:12,border:`2px solid ${cnt>0?"#ee4181":"#e8edf8"}`,background:cnt>0?"#fde8f0":"#fafbff" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14,fontWeight:cnt>0?700:500,color:"#1a2a5e" }}>{v.name}</div>
+                  <div style={{ fontSize:11,color:v.stock<=0?"#ef4444":"#7a8ab0" }}>
+                    {v.stock<=0 ? "❌ Habis" : `Sisa ${v.stock} pcs`}
+                  </div>
+                </div>
+                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <button onClick={()=>dec(v.id)} disabled={!cnt} className="tap-btn"
+                    style={{ width:32,height:32,border:"1.5px solid #d4c8e0",borderRadius:8,background:"#fde8f0",cursor:cnt?"pointer":"not-allowed",fontSize:16,color:"#ee4181",fontWeight:700,opacity:cnt?1:0.4 }}>−</button>
+                  <span style={{ fontSize:15,fontWeight:700,minWidth:20,textAlign:"center",color:cnt>0?"#ee4181":"#c8d2e0" }}>{cnt}</span>
+                  <button onClick={()=>inc(v.id)} disabled={remaining<=0||!stockOk} className="tap-btn"
+                    style={{ width:32,height:32,border:"1.5px solid #d4c8e0",borderRadius:8,background:"#e4f3fd",cursor:(remaining>0&&stockOk)?"pointer":"not-allowed",fontSize:16,color:"#2d4ba0",fontWeight:700,opacity:(remaining>0&&stockOk)?1:0.4 }}>+</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display:"flex",gap:8 }}>
+          <button onClick={confirm} disabled={remaining!==0} className="tap-btn"
+            style={{ flex:2,padding:"13px 0",background:remaining===0?"linear-gradient(135deg,#ee4181,#2d4ba0)":"#ddd",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:remaining===0?"pointer":"not-allowed",fontSize:15 }}>
+            ✅ Tambah ke Keranjang
+          </button>
+          <button onClick={onCancel} className="tap-btn"
+            style={{ flex:1,padding:"13px 0",background:"#fff",color:"#7a8ab0",border:"1.5px solid #d4c8e0",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:15 }}>
+            Batal
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
@@ -391,9 +466,10 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
   const [customerPhone, setCustomerPhone] = useState("");
   const [discount, setDiscount] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [invoice, setInvoice] = useState(null);
-  const [showCart, setShowCart] = useState(false);
+  const [saving, setSaving]             = useState(false);
+  const [invoice, setInvoice]           = useState(null);
+  const [showCart, setShowCart]         = useState(false);
+  const [variantModal, setVariantModal] = useState(null); // { item }
 
   const activeEvents = (events || []).filter(e => e.status === "ongoing" || e.status === "upcoming");
 
@@ -404,6 +480,11 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
   );
 
   const addToCart = (item) => {
+    const itemVariants = variants.filter(v => v.item_id === item.id);
+    if ((item.bundle_qty || 1) > 1 && itemVariants.length > 0) {
+      setVariantModal({ item });
+      return;
+    }
     setCart(c => {
       const ex = c.find(x => x.id === item.id);
       if (ex) return c.map(x => x.id === item.id ? { ...x, qty: x.qty + 1 } : x);
@@ -411,9 +492,18 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
     });
   };
 
-  const updateQty = (id, qty) => {
-    if (qty <= 0) setCart(c => c.filter(x => x.id !== id));
-    else setCart(c => c.map(x => x.id === id ? { ...x, qty } : x));
+  const addBundleWithVariants = (item, selectedVariants) => {
+    setVariantModal(null);
+    setCart(c => {
+      // Setiap bundle dengan pilihan desain disimpan sebagai entry terpisah
+      const cartId = item.id + "_" + Date.now();
+      return [...c, { ...item, qty: 1, cartId, selectedVariants }];
+    });
+  };
+
+  const updateQty = (cartId, qty) => {
+    if (qty <= 0) setCart(c => c.filter(x => (x.cartId || x.id) !== cartId));
+    else setCart(c => c.map(x => (x.cartId || x.id) === cartId ? { ...x, qty } : x));
   };
 
   const subtotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
@@ -434,9 +524,23 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
       if (stockItems.length) {
         await api("kr_stock_moves", { method: "POST", body: JSON.stringify(stockItems.map(x => ({ item_id: x.id, direction: "out", qty: x.qty * (x.bundle_qty||1), note: `Penjualan ${orderNo}`, ref_id: order.id }))), prefer: "return=minimal" });
         for (const m of stockItems) {
-          const item = items.find(i => i.id === m.id);
-          const deduct = m.qty * (m.bundle_qty || 1);
-          if (item) await api(`kr_items?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ stock: (item.stock || 0) - deduct }), prefer: "return=minimal" });
+          if (m.selectedVariants?.length) {
+            // Deduct per variant
+            const variantTotals = {};
+            m.selectedVariants.forEach(v => { variantTotals[v.id] = (variantTotals[v.id]||0) + m.qty; });
+            for (const [vid, qty] of Object.entries(variantTotals)) {
+              const vObj = variants.find(v => v.id === vid);
+              if (vObj) await api(`kr_item_variants?id=eq.${vid}`, { method: "PATCH", body: JSON.stringify({ stock: Math.max(0, (vObj.stock||0) - qty) }), prefer: "return=minimal" });
+            }
+            // Update item.stock = sum of all variants after deduct
+            const itemVars = variants.filter(v => v.item_id === m.id);
+            const newTotal = itemVars.reduce((s, v) => s + Math.max(0, (v.stock||0) - (variantTotals[v.id]||0)), 0);
+            await api(`kr_items?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ stock: newTotal }), prefer: "return=minimal" });
+          } else {
+            const item = items.find(i => i.id === m.id);
+            const deduct = m.qty * (m.bundle_qty || 1);
+            if (item) await api(`kr_items?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ stock: (item.stock||0) - deduct }), prefer: "return=minimal" });
+          }
         }
       }
       setInvoice({ ...order, items: cart, customer, customerPhone, payment, subtotal, discount, total });
@@ -451,10 +555,16 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
 
   const cartProps = { cart, cartCount, customer, setCustomer, customerPhone, setCustomerPhone, selectedEvent, setSelectedEvent, activeEvents, isMobile, subtotal, discount, setDiscount, total, payment, setPayment, checkout, saving, updateQty };
 
-
-
   return (
     <div>
+      {variantModal && (
+        <VariantPickerModal
+          item={variantModal.item}
+          variants={variants.filter(v => v.item_id === variantModal.item.id)}
+          onConfirm={(sel) => addBundleWithVariants(variantModal.item, sel)}
+          onCancel={() => setVariantModal(null)}
+        />
+      )}
       {/* Search + Filter */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <div style={{ flex: 1, position: "relative" }}>
@@ -584,17 +694,30 @@ function CartPanel({ cart, cartCount, customer, setCustomer, customerPhone, setC
       ) : (
         <div style={{ marginBottom: 14, maxHeight: isMobile ? 200 : 260, overflowY: "auto" }}>
           {cart.map(item => (
-            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid #d4c8e0" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a2a5e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
-                <div style={{ fontSize: 12, color: "#7a8ab0" }}>{formatRp(item.price)}</div>
+            <div key={item.cartId||item.id} style={{ padding: "8px 0", borderBottom: "1px solid #d4c8e0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1a2a5e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                  <div style={{ fontSize: 12, color: "#7a8ab0" }}>{formatRp(item.price)}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                  <button onClick={() => updateQty(item.cartId||item.id, item.qty - 1)} className="tap-btn" style={{ width: 28, height: 28, border: "1.5px solid #d4c8e0", borderRadius: 8, background: "#fde8f0", cursor: "pointer", fontSize: 15, color: "#ee4181", fontWeight: 700 }}>−</button>
+                  <span style={{ fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{item.qty}</span>
+                  <button onClick={() => updateQty(item.cartId||item.id, item.qty + 1)} className="tap-btn" style={{ width: 28, height: 28, border: "1.5px solid #d4c8e0", borderRadius: 8, background: "#e4f3fd", cursor: "pointer", fontSize: 15, color: "#2d4ba0", fontWeight: 700 }}>+</button>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#ee4181", minWidth: 72, textAlign: "right", flexShrink: 0 }}>{formatRp(item.price * item.qty)}</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-                <button onClick={() => updateQty(item.id, item.qty - 1)} className="tap-btn" style={{ width: 28, height: 28, border: "1.5px solid #d4c8e0", borderRadius: 8, background: "#fde8f0", cursor: "pointer", fontSize: 15, color: "#ee4181", fontWeight: 700 }}>−</button>
-                <span style={{ fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{item.qty}</span>
-                <button onClick={() => updateQty(item.id, item.qty + 1)} className="tap-btn" style={{ width: 28, height: 28, border: "1.5px solid #d4c8e0", borderRadius: 8, background: "#e4f3fd", cursor: "pointer", fontSize: 15, color: "#2d4ba0", fontWeight: 700 }}>+</button>
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#ee4181", minWidth: 72, textAlign: "right", flexShrink: 0 }}>{formatRp(item.price * item.qty)}</div>
+              {item.selectedVariants?.length > 0 && (
+                <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {Object.entries(
+                    item.selectedVariants.reduce((acc, v) => ({ ...acc, [v.name]: (acc[v.name]||0)+1 }), {})
+                  ).map(([name, cnt]) => (
+                    <span key={name} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 20, background: "#fde8f0", color: "#ee4181", fontWeight: 600 }}>
+                      {name}{cnt > 1 ? ` ×${cnt}` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
