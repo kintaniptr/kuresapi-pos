@@ -108,7 +108,16 @@ create table if not exists kr_reimbursements (
 );
 alter table kr_reimbursements disable row level security;
 -- Bundle qty: berapa pcs fisik per 1 unit jual (default 1 = satuan)
-alter table kr_items add column if not exists bundle_qty int default 1;`;
+alter table kr_items add column if not exists bundle_qty int default 1;
+-- Varian desain per item (misal: Stiker Bundle → Kucing, Bunga, Bintang, dst)
+create table if not exists kr_item_variants (
+  id uuid primary key default gen_random_uuid(),
+  item_id uuid references kr_items(id) on delete cascade,
+  name text not null,
+  stock int default 0,
+  created_at timestamptz default now()
+);
+alter table kr_item_variants disable row level security;`;
 
 const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
 const formatDate = (d) => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -140,7 +149,8 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [moves, setMoves] = useState([]);
   const [reimburses, setReimburses] = useState([]);
-  const [events, setEvents] = useState([]);
+  const [events, setEvents]         = useState([]);
+  const [variants, setVariants]     = useState([]); // kr_item_variants
   const [toast, setToast] = useState(null);
   const [user, setUser] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem("kr_user")) || null; } catch { return null; }
@@ -166,6 +176,9 @@ export default function App() {
     try { setItems(await api("kr_items?is_active=eq.true&order=name.asc")); }
     catch (e) { if (!e.message.includes("does not exist")) showToast("Error: " + e.message, "error"); }
   }, []);
+  const loadVariants = useCallback(async () => {
+    try { setVariants(await api("kr_item_variants?order=name.asc")); } catch {}
+  }, []);
   const loadOrders = useCallback(async () => {
     try { setOrders(await api("kr_orders?order=created_at.desc&limit=100")); } catch {}
   }, []);
@@ -179,7 +192,7 @@ export default function App() {
     try { setEvents(await api("kr_events?order=start_date.desc")); } catch {}
   }, []);
 
-  useEffect(() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); loadEvents(); }, []);
+  useEffect(() => { loadItems(); loadVariants(); loadOrders(); loadMoves(); loadReimburses(); loadEvents(); }, []);
 
   // Tampilkan login screen kalau belum login
   if (!user) return <LoginScreen onLogin={handleLogin} isMobile={isMobile} />;
@@ -237,8 +250,8 @@ export default function App() {
 
       {/* ── Content ── */}
       <div style={{ padding: isMobile ? "16px" : "28px", maxWidth: 1320, margin: "0 auto" }}>
-        {tab === "pos"       && <POS items={items} events={events} onRefresh={() => { loadItems(); loadOrders(); }} showToast={showToast} isMobile={isMobile} />}
-        {tab === "inventory" && <Inventory items={items} onRefresh={loadItems} showToast={showToast} isMobile={isMobile} />}
+        {tab === "pos"       && <POS items={items} variants={variants} events={events} onRefresh={() => { loadItems(); loadOrders(); loadVariants(); }} showToast={showToast} isMobile={isMobile} />}
+        {tab === "inventory" && <Inventory items={items} variants={variants} onRefresh={() => { loadItems(); loadVariants(); }} showToast={showToast} isMobile={isMobile} />}
         {tab === "stock"     && <StockMoves items={items} moves={moves} onRefresh={() => { loadItems(); loadMoves(); }} showToast={showToast} isMobile={isMobile} />}
         {tab === "sales"     && <Sales orders={orders} items={items} events={events} onRefresh={loadOrders} showToast={showToast} isMobile={isMobile} />}
         {tab === "events"    && <Events events={events} onRefresh={loadEvents} showToast={showToast} isMobile={isMobile} />}
@@ -369,7 +382,7 @@ function LoginScreen({ onLogin, isMobile }) {
 }
 
 // ─── POS ──────────────────────────────────────────────────────────────────────
-function POS({ items, events, onRefresh, showToast, isMobile }) {
+function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -469,7 +482,11 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
               {filtered.map(item => {
                 const c = ITEM_COLORS[item.type];
                 const bq = item.bundle_qty || 1;
-                const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor((item.stock||0) / bq);
+                const itemVariants = variants.filter(v => v.item_id === item.id);
+                const totalStock = itemVariants.length > 0
+                  ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
+                  : (item.stock || 0);
+                const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor(totalStock / bq);
                 const outOfStock = item.type !== "workshop" && bundlesLeft <= 0;
                 return (
                   <button key={item.id} onClick={() => { if (!outOfStock) { addToCart(item); } }} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 14, padding: 12, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, width: "100%" }}>
@@ -515,7 +532,11 @@ function POS({ items, events, onRefresh, showToast, isMobile }) {
                 {filtered.map(item => {
                   const c = ITEM_COLORS[item.type];
                   const bq = item.bundle_qty || 1;
-                  const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor((item.stock||0) / bq);
+                  const itemVariants = variants.filter(v => v.item_id === item.id);
+                  const totalStock = itemVariants.length > 0
+                    ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
+                    : (item.stock || 0);
+                  const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor(totalStock / bq);
                   const outOfStock = item.type !== "workshop" && bundlesLeft <= 0;
                   return (
                     <button key={item.id} onClick={() => !outOfStock && addToCart(item)} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 16, padding: 16, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, boxShadow: `0 2px 10px ${c.bg}` }}>
@@ -889,7 +910,7 @@ function InlineCell({ val, isDirty, isActive, onActivate, onChange, onDeactivate
   );
 }
 
-function Inventory({ items, onRefresh, showToast, isMobile }) {
+function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState(null);
   const [filter, setFilter]     = useState("all");
@@ -899,6 +920,13 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const fileInputRef = useRef(null);
+
+  // ── Variant state ────────────────────────────────────────────────────────
+  const [expandedItem, setExpandedItem]   = useState(null); // item.id yg lagi dibuka
+  const [variantEdits, setVariantEdits]   = useState({});   // { [variantId]: newStock }
+  const [variantName, setVariantName]     = useState("");   // input nama varian baru
+  const [savingVariants, setSavingVariants] = useState(false);
+  const [confirmDelVariant, setConfirmDelVariant] = useState(null);
 
   // ── Inline edit state ────────────────────────────────────────────────────
   const [inlineEdits, setInlineEdits] = useState({});   // { [id]: { field: val, ... } }
@@ -912,6 +940,53 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     setInlineEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: val } }));
 
   const dirtyCount = Object.keys(inlineEdits).length;
+
+  // ── Variant helpers ──────────────────────────────────────────────────────
+  const getItemVariants = (itemId) => variants.filter(v => v.item_id === itemId);
+
+  const toggleExpand = (itemId) => {
+    setExpandedItem(p => p === itemId ? null : itemId);
+    setVariantEdits({});
+    setVariantName("");
+  };
+
+  const addVariant = async (itemId) => {
+    const name = variantName.trim();
+    if (!name) return;
+    try {
+      await api("kr_item_variants", { method: "POST", body: JSON.stringify({ item_id: itemId, name, stock: 0 }), prefer: "return=minimal" });
+      setVariantName("");
+      onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const deleteVariant = async (v) => {
+    try {
+      await api(`kr_item_variants?id=eq.${v.id}`, { method: "DELETE", prefer: "return=minimal" });
+      setConfirmDelVariant(null);
+      onRefresh();
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
+  const saveVariantStocks = async (itemId) => {
+    if (!Object.keys(variantEdits).length) return;
+    setSavingVariants(true);
+    let ok = 0;
+    for (const [vid, stock] of Object.entries(variantEdits)) {
+      try {
+        await api(`kr_item_variants?id=eq.${vid}`, { method: "PATCH", body: JSON.stringify({ stock: Number(stock) || 0 }), prefer: "return=minimal" });
+        ok++;
+      } catch {}
+    }
+    // Update item.stock = total variants
+    const itemVars = getItemVariants(itemId);
+    const newTotal = itemVars.reduce((s, v) => s + (Number(variantEdits[v.id] ?? v.stock) || 0), 0);
+    await api(`kr_items?id=eq.${itemId}`, { method: "PATCH", body: JSON.stringify({ stock: newTotal }), prefer: "return=minimal" });
+    setVariantEdits({});
+    setSavingVariants(false);
+    onRefresh();
+    showToast(`✅ ${ok} desain diperbarui!`);
+  };
 
   const bulkSave = async () => {
     if (!dirtyCount) return;
@@ -1008,9 +1083,14 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     setImporting(false);
   };
 
+  const getEffectiveStock = (item) => {
+    const iv = getItemVariants(item.id);
+    return iv.length > 0 ? iv.reduce((s, v) => s + (v.stock || 0), 0) : (item.stock || 0);
+  };
+
   const filtered = items.filter(i => {
     const bq = i.bundle_qty || 1;
-    const bundles = i.type === "workshop" ? Infinity : Math.floor((i.stock||0) / bq);
+    const bundles = i.type === "workshop" ? Infinity : Math.floor(getEffectiveStock(i) / bq);
     if (filter === "low")  return i.type !== "workshop" && bundles > 0 && bundles <= 3;
     if (filter === "out")  return i.type !== "workshop" && bundles <= 0;
     return filter === "all" || i.type === filter;
@@ -1020,8 +1100,8 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     product: items.filter(x=>x.type==="product").length,
     workshop: items.filter(x=>x.type==="workshop").length,
     equipment: items.filter(x=>x.type==="equipment").length,
-    low: items.filter(x=>{ const bq=x.bundle_qty||1; const b=Math.floor((x.stock||0)/bq); return x.type!=="workshop"&&b>0&&b<=3; }).length,
-    out: items.filter(x=>{ const bq=x.bundle_qty||1; return x.type!=="workshop"&&Math.floor((x.stock||0)/bq)<=0; }).length,
+    low: items.filter(x=>{ const bq=x.bundle_qty||1; const b=Math.floor(getEffectiveStock(x)/bq); return x.type!=="workshop"&&b>0&&b<=3; }).length,
+    out: items.filter(x=>{ const bq=x.bundle_qty||1; return x.type!=="workshop"&&Math.floor(getEffectiveStock(x)/bq)<=0; }).length,
   };
 
 
@@ -1078,6 +1158,7 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
     <div>
       {confirmDelete && <ConfirmModal title="Hapus Item?" message={`Hapus "${confirmDelete.name}" secara permanen?`} onConfirm={()=>deleteItem(confirmDelete)} onCancel={()=>setConfirmDelete(null)} />}
       {confirmBulk  && <ConfirmModal title={`Hapus ${selected.size} Item?`} message={`Hapus ${selected.size} item yang dipilih secara permanen?`} onConfirm={bulkDelete} onCancel={()=>setConfirmBulk(false)} />}
+      {confirmDelVariant && <ConfirmModal title="Hapus Desain?" message={`Hapus desain "${confirmDelVariant.name}"?`} onConfirm={()=>deleteVariant(confirmDelVariant)} onCancel={()=>setConfirmDelVariant(null)} />}
 
       {/* ── Bulk SAVE bar ── */}
       {dirtyCount > 0 && (
@@ -1290,12 +1371,21 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                       {curType === "workshop"
                         ? <span style={{color:"#d4c8e0",fontSize:12}}>—</span>
                         : (() => {
-                            const stok = Number(getVal(item,"stock"))||0;
+                            const stok = getEffectiveStock(item);
                             const bq   = Number(getVal(item,"bundle_qty"))||1;
                             const sisa = Math.floor(stok / bq);
-                            if (sisa <= 0)  return <span style={{background:"#fee2e2",color:"#ef4444",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>❌ Habis</span>;
-                            if (sisa <= 3)  return <span style={{background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>⚠️ {sisa} bundle</span>;
-                            return <span style={{background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>✅ {sisa} bundle</span>;
+                            const hasV = getItemVariants(item.id).length > 0;
+                            return (
+                              <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"center"}}>
+                                {sisa <= 0
+                                  ? <span style={{background:"#fee2e2",color:"#ef4444",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>❌ Habis</span>
+                                  : sisa <= 3
+                                  ? <span style={{background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>⚠️ {sisa} bundle</span>
+                                  : <span style={{background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>✅ {sisa} bundle</span>
+                                }
+                                {hasV && <span style={{fontSize:10,color:"#7a8ab0"}}>({stok} pcs)</span>}
+                              </div>
+                            );
                           })()
                       }
                     </td>
@@ -1303,11 +1393,88 @@ function Inventory({ items, onRefresh, showToast, isMobile }) {
                     {/* Aksi */}
                     <td style={{ padding:"6px 8px" }}>
                       <div style={{ display:"flex",gap:5 }}>
-                        <button onClick={()=>openEdit(item)} className="tap-btn" style={{ padding:"5px 10px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap" }}>✏️ Detail</button>
+                        {curType !== "workshop" && (
+                          <button onClick={()=>toggleExpand(item.id)} className="tap-btn"
+                            style={{ padding:"5px 9px",background:expandedItem===item.id?"#fef9c3":"#f8faff",color:expandedItem===item.id?"#92400e":"#7a8ab0",border:`1.5px solid ${expandedItem===item.id?"#f59e0b":"#d4c8e0"}`,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600 }}>
+                            🎨 {getItemVariants(item.id).length > 0 ? getItemVariants(item.id).length : "+"}
+                          </button>
+                        )}
+                        <button onClick={()=>openEdit(item)} className="tap-btn" style={{ padding:"5px 10px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap" }}>✏️</button>
                         <button onClick={()=>setConfirmDelete(item)} className="tap-btn" style={{ padding:"5px 9px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12 }}>🗑️</button>
                       </div>
                     </td>
                   </tr>
+
+                  {/* ── Variant Panel (expanded row) ── */}
+                  {expandedItem === item.id && (
+                    <tr key={item.id + "-variants"}>
+                      <td colSpan={10} style={{ padding:"0 14px 14px 48px", background:"#fffbeb" }}>
+                        <div style={{ borderLeft:"3px solid #f59e0b",paddingLeft:16,paddingTop:12 }}>
+                          <div style={{ fontWeight:700,fontSize:13,color:"#92400e",marginBottom:10 }}>
+                            🎨 Desain untuk <b>{item.name}</b>
+                            <span style={{ fontSize:11,fontWeight:500,color:"#7a8ab0",marginLeft:8 }}>
+                              — update sisa stok per desain abis event
+                            </span>
+                          </div>
+
+                          {/* Variant list */}
+                          <div style={{ display:"flex",flexWrap:"wrap",gap:8,marginBottom:12 }}>
+                            {getItemVariants(item.id).map(v => {
+                              const editVal = variantEdits[v.id];
+                              const isDirty = editVal !== undefined;
+                              const curStock = isDirty ? editVal : v.stock;
+                              return (
+                                <div key={v.id} style={{ background:"#fff",border:`2px solid ${isDirty?"#f59e0b":"#e8edf8"}`,borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:8,minWidth:160 }}>
+                                  <div style={{ flex:1 }}>
+                                    <div style={{ fontSize:12,fontWeight:700,color:"#1a2a5e",marginBottom:4 }}>{v.name}</div>
+                                    <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                                      <span style={{ fontSize:11,color:"#7a8ab0" }}>Sisa:</span>
+                                      <input type="number" min={0} value={curStock}
+                                        onChange={e => setVariantEdits(p => ({...p,[v.id]:e.target.value}))}
+                                        style={{ width:60,padding:"3px 6px",border:`1.5px solid ${isDirty?"#f59e0b":"#d4c8e0"}`,borderRadius:6,fontSize:13,fontWeight:700,textAlign:"center",background:isDirty?"#fef9c3":"#fff" }}
+                                      />
+                                      <span style={{ fontSize:11,color:"#7a8ab0" }}>pcs</span>
+                                    </div>
+                                  </div>
+                                  <button onClick={()=>setConfirmDelVariant(v)} className="tap-btn"
+                                    style={{ padding:"4px 7px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:7,cursor:"pointer",fontSize:11 }}>✕</button>
+                                </div>
+                              );
+                            })}
+
+                            {/* Tambah desain baru */}
+                            <div style={{ background:"#f8faff",border:"2px dashed #d4c8e0",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:6,minWidth:160 }}>
+                              <input placeholder="Nama desain baru..." value={variantName}
+                                onChange={e=>setVariantName(e.target.value)}
+                                onKeyDown={e=>{ if(e.key==="Enter") addVariant(item.id); }}
+                                style={{ flex:1,padding:"4px 8px",border:"1.5px solid #d4c8e0",borderRadius:6,fontSize:12 }}
+                              />
+                              <button onClick={()=>addVariant(item.id)} className="tap-btn"
+                                style={{ padding:"5px 10px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700 }}>+</button>
+                            </div>
+                          </div>
+
+                          {/* Save bar */}
+                          {Object.keys(variantEdits).length > 0 && (
+                            <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                              <button onClick={()=>saveVariantStocks(item.id)} disabled={savingVariants} className="tap-btn"
+                                style={{ padding:"8px 18px",background:savingVariants?"#ddd":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:savingVariants?"not-allowed":"pointer",fontSize:13 }}>
+                                {savingVariants ? "⏳ Menyimpan..." : `💾 Simpan ${Object.keys(variantEdits).length} Perubahan`}
+                              </button>
+                              <button onClick={()=>setVariantEdits({})} className="tap-btn"
+                                style={{ padding:"8px 12px",background:"#fff",color:"#7a8ab0",border:"1.5px solid #d4c8e0",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:13 }}>
+                                Batalkan
+                              </button>
+                              <span style={{ fontSize:12,color:"#92400e" }}>
+                                Total: {getItemVariants(item.id).reduce((s,v)=>s+(Number(variantEdits[v.id]??v.stock)||0),0)} pcs
+                                → {Math.floor(getItemVariants(item.id).reduce((s,v)=>s+(Number(variantEdits[v.id]??v.stock)||0),0) / (item.bundle_qty||1))} bundle
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 );
               })}
             </tbody>
