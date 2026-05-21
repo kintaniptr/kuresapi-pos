@@ -2167,7 +2167,15 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   const save = async () => {
     if (!form.expense_details.trim()) return showToast("Detail pengeluaran wajib diisi", "error");
     try {
-      const payload = { ...form, amount: Number(form.amount) || 0, transaction_date: form.transaction_date || null };
+      const payload = {
+        expense_details: form.expense_details,
+        event: form.event || null,
+        amount: Number(form.amount) || 0,
+        pic: form.pic || null,
+        status: form.status || "unpaid",
+        transaction_date: form.transaction_date || null,
+        notes: form.notes || null,
+      };
       if (editing) {
         await api(`kr_reimbursements?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
         showToast("✅ Reimbursement diperbarui!");
@@ -2221,18 +2229,18 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Event</label>
           <select value={["Workshop","Art Market","Lainnya"].includes(form.event) ? form.event : form.event ? "Lainnya" : ""}
-            onChange={e => setForm(f => ({ ...f, event: e.target.value === "Lainnya" ? "" : e.target.value, _eventCustom: e.target.value === "Lainnya" ? true : false }))}
+            onChange={e => setForm(f => ({ ...f, event: e.target.value === "Lainnya" ? "" : e.target.value }))}
             style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, background: "#fff" }}>
             <option value="">— Pilih event —</option>
             <option value="Workshop">🎨 Workshop</option>
             <option value="Art Market">🛍️ Art Market</option>
             <option value="Lainnya">✏️ Lainnya...</option>
           </select>
-          {(form._eventCustom || (form.event && !["Workshop","Art Market",""].includes(form.event))) && (
+          {(form.event === "" && form._lainnya) || (form.event && !["Workshop","Art Market",""].includes(form.event)) ? (
             <input placeholder="Tulis nama event..." value={form.event}
               onChange={e => setForm(f => ({ ...f, event: e.target.value }))}
               style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box", marginTop: 8 }} />
-          )}
+          ) : null}
         </div>
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 6, fontWeight: 600 }}>Status</label>
