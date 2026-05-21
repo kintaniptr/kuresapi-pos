@@ -2054,6 +2054,26 @@ function OrderDetail({ detail, orderItems, loadingDetail, onClose, onDelete, onI
 }
 
 // ─── REIMBURSEMENT ────────────────────────────────────────────────────────────
+// ─── REIMBURSEMENT INLINE CELL ───────────────────────────────────────────────
+function RimCell({ val, isDirty, isActive, onActivate, onChange, onDeactivate, type="text", width, align="left", format, selectOpts }) {
+  if (isActive) {
+    if (selectOpts) return (
+      <select autoFocus value={val||""} onChange={e=>onChange(e.target.value)} onBlur={onDeactivate}
+        style={{ width:width||"100%",padding:"3px 6px",border:"2px solid #2d4ba0",borderRadius:6,fontSize:12,background:"#fff" }}>
+        {selectOpts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+      </select>
+    );
+    return <input autoFocus type={type} value={val??""} onChange={e=>onChange(e.target.value)}
+      onBlur={onDeactivate} onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape"){e.preventDefault();onDeactivate();}}}
+      style={{ width:width||"100%",padding:"3px 8px",border:"2px solid #2d4ba0",borderRadius:6,fontSize:12,textAlign:align,background:"#fff" }} />;
+  }
+  const disp = format ? format(val) : (val || <span style={{color:"#c8d2e0"}}>—</span>);
+  return <div onClick={onActivate} title="Klik untuk edit"
+    style={{ cursor:"text",padding:"3px 6px",borderRadius:6,minHeight:26,display:"flex",alignItems:"center",
+      justifyContent:align==="right"?"flex-end":"flex-start",
+      background:isDirty?"#fef9c3":"transparent",border:isDirty?"1.5px dashed #f59e0b":"1.5px solid transparent" }}>{disp}</div>;
+}
+
 function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -2064,6 +2084,41 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   const [selected, setSelected] = useState(new Set());
   const fileInputRef = useRef(null);
   const [form, setForm] = useState({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" });
+
+  // ── Inline edit state ────────────────────────────────────────────────────
+  const [rimEdits, setRimEdits]     = useState({}); // { [id]: { field: val } }
+  const [rimCell, setRimCell]       = useState(null); // { id, field }
+  const [rimSaving, setRimSaving]   = useState(false);
+  const rimDirty = Object.keys(rimEdits).length;
+
+  const getRimVal = (r, field) => rimEdits[r.id]?.[field] !== undefined ? rimEdits[r.id][field] : r[field];
+  const setRimField = (id, field, val) => setRimEdits(p => ({ ...p, [id]: { ...p[id], [field]: val } }));
+
+  const rimBulkSave = async () => {
+    if (!rimDirty) return;
+    setRimSaving(true);
+    let ok = 0, fail = 0;
+    for (const [id, changes] of Object.entries(rimEdits)) {
+      const orig = reimburses.find(r => r.id === id);
+      if (!orig) continue;
+      const payload = {
+        expense_details: changes.expense_details ?? orig.expense_details,
+        event:            changes.event            ?? orig.event,
+        amount:           Number(changes.amount    ?? orig.amount) || 0,
+        pic:              changes.pic              ?? orig.pic,
+        status:           changes.status           ?? orig.status,
+        transaction_date: changes.transaction_date ?? orig.transaction_date ?? null,
+        notes:            changes.notes            ?? orig.notes,
+      };
+      try {
+        await api(`kr_reimbursements?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
+        ok++;
+      } catch { fail++; }
+    }
+    setRimEdits({}); setRimCell(null);
+    setRimSaving(false); onRefresh();
+    showToast(fail ? `⚠️ ${ok} tersimpan, ${fail} gagal` : `✅ ${ok} reimbursement diperbarui!`);
+  };
 
   const openNew = () => { setForm({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (r) => { setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "" }); setEditing(r.id); setShowForm(true); };
@@ -2278,7 +2333,22 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
       {confirmDelete && <ConfirmModal title="Hapus Reimbursement?" message={`Hapus "${confirmDelete.expense_details}" (${formatRp(confirmDelete.amount)}) secara permanen?`} onConfirm={() => deleteItem(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
       {confirmBulk && <ConfirmModal title={`Hapus ${selected.size} Item?`} message={`Hapus ${selected.size} reimbursement yang dipilih secara permanen?`} onConfirm={bulkDelete} onCancel={() => setConfirmBulk(false)} />}
 
-      {/* Bulk action bar */}
+      {/* Bulk SAVE bar */}
+      {rimDirty > 0 && (
+        <div style={{ ...CARD, padding:"11px 16px", marginBottom:12, background:"linear-gradient(135deg,#fef9c3,#fefce8)", border:"2px solid #f59e0b", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ fontSize:14, fontWeight:700, color:"#92400e", flex:1 }}>✏️ {rimDirty} item memiliki perubahan yang belum disimpan</span>
+          <button onClick={rimBulkSave} disabled={rimSaving} className="tap-btn"
+            style={{ padding:"8px 18px", background:rimSaving?"#ddd":"linear-gradient(135deg,#10b981,#059669)", color:"#fff", border:"none", borderRadius:10, fontWeight:700, cursor:rimSaving?"not-allowed":"pointer", fontSize:13 }}>
+            {rimSaving ? "⏳ Menyimpan..." : `💾 Simpan ${rimDirty} Perubahan`}
+          </button>
+          <button onClick={()=>{ setRimEdits({}); setRimCell(null); }} className="tap-btn"
+            style={{ padding:"8px 14px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:10, fontWeight:600, cursor:"pointer", fontSize:13 }}>
+            ✕ Batalkan
+          </button>
+        </div>
+      )}
+
+      {/* Bulk DELETE bar */}
       {selected.size > 0 && (
         <div style={{ ...CARD, padding: "10px 16px", marginBottom: 12, background: "#fde8f0", border: "1.5px solid #f5a8c4", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>✓ {selected.size} item dipilih</span>
@@ -2364,6 +2434,9 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
         </div>
       ) : (
         <div style={{ ...CARD, overflow: "hidden" }}>
+          <div style={{ fontSize:12,color:"#7a8ab0",padding:"8px 14px 4px",display:"flex",alignItems:"center",gap:6 }}>
+            <span style={{background:"#fef9c3",border:"1px solid #f59e0b",borderRadius:4,padding:"2px 8px",color:"#92400e",fontWeight:600}}>✏️ Klik sel untuk edit langsung</span>
+          </div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
@@ -2371,37 +2444,90 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
                   <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleSelectAll}
                     style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
                 </th>
-                {["Detail Pengeluaran","Event","PIC","Jumlah","Tanggal","Status","Aksi"].map(h => (
-                  <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d0e5f5" }}>{h}</th>
+                {[["Detail Pengeluaran",220],["Event",140],["PIC",100],["Jumlah",110],["Tanggal",110],["Status",130],["Catatan",150],["Aksi",80]].map(([h,w]) => (
+                  <th key={h} style={{ padding:"11px 8px", textAlign:"left", fontSize:12, color:"#1a2a5e", fontWeight:700, borderBottom:"2px solid #d0e5f5", minWidth:w }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map(r => {
                 const isSel = selected.has(r.id);
+                const isDirtyRow = !!rimEdits[r.id];
+
                 return (
-                  <tr key={r.id} style={{ borderBottom: "1px solid #d0e5f5", background: isSel ? "#fde8f0" : "transparent" }}>
-                    <td style={{ padding: "11px 14px" }}>
-                      <input type="checkbox" checked={isSel} onChange={() => toggleSelect(r.id)}
-                        style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
+                  <tr key={r.id} style={{ borderBottom:"1px solid #d0e5f5", background:isDirtyRow?"#fefce8":isSel?"#fde8f0":"transparent" }}>
+                    <td style={{ padding:"8px 14px" }}>
+                      <input type="checkbox" checked={isSel} onChange={()=>toggleSelect(r.id)} style={{ width:16,height:16,accentColor:"#ee4181",cursor:"pointer" }} />
                     </td>
-                    <td style={{ padding: "11px 14px", fontSize: 13, fontWeight: 600, color: "#1a2a5e", maxWidth: 240 }}>{r.expense_details}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.event || "—"}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 13, color: "#7a8ab0" }}>{r.pic || "—"}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 14, fontWeight: 700, color: "#ee4181" }}>{formatRp(r.amount)}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: "#7a8ab0" }}>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric" }) : "—"}</td>
-                    <td style={{ padding: "11px 14px" }}>
-                      <button onClick={() => toggleStatus(r)} className="tap-btn" style={{
-                        padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
-                        background: r.status === "paid" ? "#d1fae5" : "#fef3c7",
-                        color: r.status === "paid" ? "#10b981" : "#f59e0b",
-                      }}>{r.status === "paid" ? "✅ Lunas" : "⏳ Belum Dibayar"}</button>
+                    <td style={{ padding:"4px 8px",fontSize:13,fontWeight:600 }}>
+                      <RimCell
+                      val={getRimVal(r,"expense_details")} isDirty={!!rimEdits[r.id]?.expense_details}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="expense_details"}
+                      onActivate={()=>setRimCell({id:r.id,field:"expense_details"})}
+                      onChange={v=>setRimField(r.id,"expense_details",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      width={210} />
                     </td>
-                    <td style={{ padding: "11px 14px" }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => openEdit(r)} className="tap-btn" style={{ padding: "5px 10px", background: "#e4f3fd", color: "#2d4ba0", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✏️ Edit</button>
-                        <button onClick={() => setConfirmDelete(r)} className="tap-btn" style={{ padding: "5px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
-                      </div>
+                    <td style={{ padding:"4px 8px" }}>
+                      <RimCell
+                      val={getRimVal(r,"event")} isDirty={!!rimEdits[r.id]?.event}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="event"}
+                      onActivate={()=>setRimCell({id:r.id,field:"event"})}
+                      onChange={v=>setRimField(r.id,"event",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      width={130} />
+                    </td>
+                    <td style={{ padding:"4px 8px" }}>
+                      <RimCell
+                      val={getRimVal(r,"pic")} isDirty={!!rimEdits[r.id]?.pic}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="pic"}
+                      onActivate={()=>setRimCell({id:r.id,field:"pic"})}
+                      onChange={v=>setRimField(r.id,"pic",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      width={90} />
+                    </td>
+                    <td style={{ padding:"4px 8px" }}>
+                      <RimCell
+                      val={getRimVal(r,"amount")} isDirty={!!rimEdits[r.id]?.amount}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="amount"}
+                      onActivate={()=>setRimCell({id:r.id,field:"amount"})}
+                      onChange={v=>setRimField(r.id,"amount",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      type="number" align="right" width={100}
+                        format={v=><span style={{fontWeight:700,color:"#ee4181"}}>{formatRp(Number(v)||0)}</span>} />
+                    </td>
+                    <td style={{ padding:"4px 8px" }}>
+                      <RimCell
+                      val={getRimVal(r,"transaction_date")} isDirty={!!rimEdits[r.id]?.transaction_date}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="transaction_date"}
+                      onActivate={()=>setRimCell({id:r.id,field:"transaction_date"})}
+                      onChange={v=>setRimField(r.id,"transaction_date",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      type="date" width={110}
+                        format={v=>v ? new Date(v).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric"}) : null} />
+                    </td>
+                    <td style={{ padding:"4px 8px" }}>
+                      <RimCell
+                      val={getRimVal(r,"status")} isDirty={!!rimEdits[r.id]?.status}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="status"}
+                      onActivate={()=>setRimCell({id:r.id,field:"status"})}
+                      onChange={v=>setRimField(r.id,"status",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      width={120}
+                        selectOpts={[["unpaid","⏳ Belum Dibayar"],["paid","✅ Lunas"]]}
+                        format={v=><span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:v==="paid"?"#d1fae5":"#fef3c7",color:v==="paid"?"#10b981":"#f59e0b"}}>{v==="paid"?"✅ Lunas":"⏳ Belum"}</span>} />
+                    </td>
+                    <td style={{ padding:"4px 8px" }}>
+                      <RimCell
+                      val={getRimVal(r,"notes")} isDirty={!!rimEdits[r.id]?.notes}
+                      isActive={rimCell?.id===r.id&&rimCell?.field==="notes"}
+                      onActivate={()=>setRimCell({id:r.id,field:"notes"})}
+                      onChange={v=>setRimField(r.id,"notes",v)}
+                      onDeactivate={()=>setRimCell(null)}
+                      width={140} />
+                    </td>
+                    <td style={{ padding:"6px 8px" }}>
+                      <button onClick={()=>setConfirmDelete(r)} className="tap-btn" style={{ padding:"5px 8px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12 }}>🗑️</button>
                     </td>
                   </tr>
                 );
