@@ -122,6 +122,20 @@ alter table kr_item_variants disable row level security;`;
 const formatRp = (n) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n || 0);
 const formatDate = (d) => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const genOrderNo = () => `KRS-${Date.now().toString().slice(-8)}`;
+
+// Auto-generate SKU: K001 = Produk, W001 = Workshop, P001 = Perlengkapan
+const SKU_PREFIX = { product: "K", workshop: "W", equipment: "P" };
+const generateSku = (type, allItems) => {
+  const prefix = SKU_PREFIX[type] || "X";
+  const existing = allItems
+    .filter(i => i.sku && i.sku.toUpperCase().startsWith(prefix))
+    .map(i => parseInt(i.sku.slice(prefix.length)) || 0)
+    .filter(n => n > 0);
+  const next = existing.length > 0 ? Math.max(...existing) + 1 : 1;
+  return `${prefix}${String(next).padStart(3, "0")}`;
+};
+// Returns true if SKU looks like an auto-generated one (e.g. K001, W012, P003)
+const isAutoSku = (sku) => /^[KWPkwp]\d{3,}$/.test(sku || "");
 const useIsMobile = () => {
   const [m, setM] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -1172,7 +1186,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
   const discardEdits = () => { setInlineEdits({}); setActiveCell(null); };
 
   // ── Detail form save ─────────────────────────────────────────────────────
-  const openNew  = () => { setForm({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", bundle_qty: 1, description: "" }); setEditing(null); setShowForm(true); };
+  const openNew  = () => { const defType = "product"; setForm({ name: "", type: defType, sku: generateSku(defType, items), price: "", cost: "", stock: "", unit: "pcs", bundle_qty: 1, description: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (item) => { setForm({ ...item, price: item.price||"", cost: item.cost||"", stock: item.stock||"", bundle_qty: item.bundle_qty||1 }); setEditing(item.id); setShowForm(true); };
 
   const save = async () => {
@@ -1252,9 +1266,10 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
     return filter === "all" || i.type === filter;
   }).sort((a, b) => {
     const { key, dir } = sortInv;
-    if (key === "price")  return (a.price - b.price) * dir;
-    if (key === "stock")  return (getEffectiveStock(a) - getEffectiveStock(b)) * dir;
-    if (key === "type")   return a.type.localeCompare(b.type) * dir;
+    if (key === "price")      return (a.price - b.price) * dir;
+    if (key === "stock")      return (getEffectiveStock(a) - getEffectiveStock(b)) * dir;
+    if (key === "type")       return a.type.localeCompare(b.type) * dir;
+    if (key === "created_at") return (new Date(a.created_at) - new Date(b.created_at)) * dir;
     return a.name.localeCompare(b.name) * dir; // default: name
   });
   const stats = {
@@ -1277,16 +1292,34 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
           <div style={{ display: "flex", gap: 7 }}>
             {[["product","📦 Produk"],["workshop","🎓 Workshop"],["equipment","🔧 Perlengkapan"]].map(([v,l]) => {
               const c = ITEM_COLORS[v];
-              return <button key={v} onClick={() => setForm(f=>({...f,type:v}))} className="tap-btn" style={{ flex:1,padding:"10px 0",border:`2px solid ${form.type===v?c.text:"#d4c8e0"}`,borderRadius:10,background:form.type===v?c.bg:"#fff",color:form.type===v?c.text:"#7a8ab0",fontWeight:form.type===v?700:500,cursor:"pointer",fontSize:isMobile?11:12 }}>{l}</button>;
+              return <button key={v} onClick={() => {
+                const newSku = (!form.sku || isAutoSku(form.sku)) ? generateSku(v, items) : form.sku;
+                setForm(f=>({...f, type:v, sku: newSku}));
+              }} className="tap-btn" style={{ flex:1,padding:"10px 0",border:`2px solid ${form.type===v?c.text:"#d4c8e0"}`,borderRadius:10,background:form.type===v?c.bg:"#fff",color:form.type===v?c.text:"#7a8ab0",fontWeight:form.type===v?700:500,cursor:"pointer",fontSize:isMobile?11:12 }}>{l}</button>;
             })}
           </div>
         </div>
-        {[["name","Nama *","text","Nama produk / workshop..."],["sku","SKU / Kode","text","Opsional"],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
+        {[["name","Nama *","text","Nama produk / workshop..."],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
           <div key={k}>
             <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>{l}</label>
             <input type={t} placeholder={ph} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:15 }} />
           </div>
         ))}
+        {/* SKU with auto-generate */}
+        <div>
+          <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>SKU / Kode</label>
+          <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+            <input type="text" placeholder={`Otomatis: ${SKU_PREFIX[form.type]||"K"}001`} value={form.sku} onChange={e=>setForm(f=>({...f,sku:e.target.value}))} style={{ flex:1,padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:15 }} />
+            <button type="button" onClick={() => setForm(f=>({...f, sku: generateSku(f.type, items)}))} className="tap-btn"
+              title="Generate ulang SKU otomatis"
+              style={{ padding:"11px 12px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:600,whiteSpace:"nowrap",flexShrink:0 }}>
+              🔄 Auto
+            </button>
+          </div>
+          <div style={{ fontSize:11,color:"#7a8ab0",marginTop:4 }}>
+            Format: <b>{SKU_PREFIX.product}001</b> Produk · <b>{SKU_PREFIX.workshop}001</b> Workshop · <b>{SKU_PREFIX.equipment}001</b> Perlengkapan — atau isi manual
+          </div>
+        </div>
         <div style={{ background:"#fef9c3",border:"1.5px solid #f59e0b",borderRadius:10,padding:"12px 14px" }}>
           <label style={{ fontSize:13,color:"#92400e",display:"block",marginBottom:5,fontWeight:700 }}>📦 Bundle — Jual per berapa pcs?</label>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
@@ -1356,6 +1389,11 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
               {l} <span style={{opacity:0.7}}>({stats[v]||0})</span>
             </button>
           ))}
+          {/* Quick sort: Terbaru */}
+          <button onClick={()=>setSortInv(s=> s.key==="created_at" ? {key:"created_at",dir:-s.dir} : {key:"created_at",dir:-1})} className="tap-btn"
+            style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${sortInv.key==="created_at"?"#2d4ba0":"#d4c8e0"}`,background:sortInv.key==="created_at"?"#e4f3fd":"#fff",color:sortInv.key==="created_at"?"#2d4ba0":"#7a8ab0",fontWeight:sortInv.key==="created_at"?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
+            📅 Terbaru{sortInv.key==="created_at"?(sortInv.dir===-1?" ↓":" ↑"):""}
+          </button>
         </div>
         <button onClick={openNew} className="tap-btn" style={{ padding:"9px 14px",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0 }}>+ Tambah</button>
         <button onClick={exportExcel} className="tap-btn" style={{ padding:"9px 14px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:13,flexShrink:0 }}>📥 Export</button>
@@ -1437,16 +1475,17 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                   <input type="checkbox" checked={filtered.length>0&&selected.size===filtered.length} onChange={toggleSelectAll} style={{ width:16,height:16,accentColor:"#ee4181",cursor:"pointer" }} />
                 </th>
                 {[
-                  { label:"Nama",       w:200, key:"name"  },
-                  { label:"Tipe",       w:120, key:"type"  },
-                  { label:"SKU",        w:100, key:null    },
-                  { label:"Satuan",     w:80,  key:null    },
-                  { label:"Bundle",     w:90,  key:null    },
-                  { label:"Harga Jual", w:120, key:"price" },
-                  { label:"Modal",      w:110, key:null    },
-                  { label:"Stok (pcs)", w:100, key:"stock" },
-                  { label:"Sisa Bundle",w:100, key:null    },
-                  { label:"Aksi",       w:130, key:null    },
+                  { label:"Nama",       w:200, key:"name"       },
+                  { label:"Tipe",       w:120, key:"type"       },
+                  { label:"SKU",        w:100, key:null         },
+                  { label:"Satuan",     w:80,  key:null         },
+                  { label:"Bundle",     w:90,  key:null         },
+                  { label:"Harga Jual", w:120, key:"price"      },
+                  { label:"Modal",      w:110, key:null         },
+                  { label:"Stok (pcs)", w:100, key:"stock"      },
+                  { label:"Sisa Bundle",w:100, key:null         },
+                  { label:"Ditambahkan",w:110, key:"created_at" },
+                  { label:"Aksi",       w:130, key:null         },
                 ].map(({ label, w, key }) => (
                   <th key={label} onClick={key ? ()=>setSortInv(s=>({ key, dir: s.key===key ? -s.dir : 1 })) : undefined}
                     style={{ padding:"12px 8px",textAlign:"left",fontSize:12,color:sortInv.key===key?"#2d4ba0":"#1a2a5e",fontWeight:700,borderBottom:"2px solid #d4c8e0",minWidth:w,cursor:key?"pointer":"default",userSelect:"none",whiteSpace:"nowrap" }}>
@@ -1563,6 +1602,11 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     </td>
 
                     {/* Aksi */}
+                    <td style={{ padding:"4px 8px",fontSize:11,color:"#7a8ab0",whiteSpace:"nowrap" }}>
+                      {item.created_at ? new Date(item.created_at).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"2-digit"}) : "—"}
+                    </td>
+
+                    {/* Aksi */}
                     <td style={{ padding:"6px 8px" }}>
                       <div style={{ display:"flex",gap:5 }}>
                         {curType === "product" && (
@@ -1580,7 +1624,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                   {/* ── Variant Panel (expanded row) ── */}
                   {expandedItem === item.id && (
                     <tr key={item.id + "-variants"}>
-                      <td colSpan={10} style={{ padding:"0 14px 14px 48px", background:"#fffbeb" }}>
+                      <td colSpan={11} style={{ padding:"0 14px 14px 48px", background:"#fffbeb" }}>
                         <div style={{ borderLeft:"3px solid #f59e0b",paddingLeft:16,paddingTop:12 }}>
                           <div style={{ fontWeight:700,fontSize:13,color:"#92400e",marginBottom:10 }}>
                             🎨 Desain untuk <b>{item.name}</b>
@@ -1887,6 +1931,7 @@ function Sales({ orders, items, onRefresh, showToast, isMobile }) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [reInvoice, setReInvoice] = useState(null); // invoice yg dibuka ulang
+  const [sortSales, setSortSales] = useState({ key: "created_at", dir: -1 }); // newest first default
 
   const deleteOrder = async (order) => {
     try {
@@ -1928,6 +1973,12 @@ function Sales({ orders, items, onRefresh, showToast, isMobile }) {
       return d >= s && d <= e;
     }
     return true;
+  }).slice().sort((a, b) => {
+    const { key, dir } = sortSales;
+    if (key === "total")      return (a.total - b.total) * dir;
+    if (key === "customer")   return (a.customer_name||"").localeCompare(b.customer_name||"") * dir;
+    // default: created_at
+    return (new Date(a.created_at) - new Date(b.created_at)) * dir;
   });
 
   const periodRevenue = filteredOrders.filter(o => o.status === "paid").reduce((s, o) => s + (o.total || 0), 0);
@@ -2039,8 +2090,19 @@ function Sales({ orders, items, onRefresh, showToast, isMobile }) {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "#fafafa" }}>
-                    {["No Order","Waktu","Customer","Pembayaran","Total","Status",""].map(h => (
-                      <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 12, color: "#7a8ab0", fontWeight: 700, borderBottom: "1.5px solid #d4c8e0" }}>{h}</th>
+                    {[
+                      { label:"No Order",    key:null           },
+                      { label:"Waktu",       key:"created_at"   },
+                      { label:"Customer",    key:"customer"     },
+                      { label:"Pembayaran",  key:null           },
+                      { label:"Total",       key:"total"        },
+                      { label:"Status",      key:null           },
+                      { label:"",            key:null           },
+                    ].map(({ label, key }) => (
+                      <th key={label} onClick={key ? ()=>setSortSales(s=>({key,dir:s.key===key?-s.dir:-1})) : undefined}
+                        style={{ padding:"10px 14px",textAlign:"left",fontSize:12,color:sortSales.key===key?"#2d4ba0":"#7a8ab0",fontWeight:700,borderBottom:"1.5px solid #d4c8e0",cursor:key?"pointer":"default",userSelect:"none",whiteSpace:"nowrap" }}>
+                        {label}{key && sortSales.key===key?(sortSales.dir===-1?" ↓":" ↑"):key?" ↕":""}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -2345,7 +2407,10 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
-  const filtered = reimburses.filter(r => filterStatus === "all" || r.status === filterStatus);
+  const filtered = reimburses
+    .filter(r => filterStatus === "all" || r.status === filterStatus)
+    .slice()
+    .sort((a, b) => (new Date(b.created_at) - new Date(a.created_at))); // newest first always
   const totalUnpaid = reimburses.filter(r => r.status === "unpaid").reduce((s, r) => s + (r.amount || 0), 0);
   const totalPaid = reimburses.filter(r => r.status === "paid").reduce((s, r) => s + (r.amount || 0), 0);
 
@@ -2548,8 +2613,8 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
                   <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleSelectAll}
                     style={{ width: 16, height: 16, accentColor: "#ee4181", cursor: "pointer" }} />
                 </th>
-                {[["Detail Pengeluaran",220],["Event",140],["PIC",100],["Jumlah",110],["Tanggal",110],["Status",130],["Catatan",150],["Aksi",80]].map(([h,w]) => (
-                  <th key={h} style={{ padding:"11px 8px", textAlign:"left", fontSize:12, color:"#1a2a5e", fontWeight:700, borderBottom:"2px solid #d0e5f5", minWidth:w }}>{h}</th>
+                {[["Detail Pengeluaran",220],["Event",140],["PIC",100],["Jumlah",110],["Tanggal",110],["Status",130],["Catatan",150],["📅 Terbaru",90],["Aksi",80]].map(([h,w]) => (
+                  <th key={h} style={{ padding:"11px 8px", textAlign:"left", fontSize:12, color: h==="📅 Terbaru"?"#2d4ba0":"#1a2a5e", fontWeight:700, borderBottom:"2px solid #d0e5f5", minWidth:w }}>{h}{h==="📅 Terbaru"?" ↓":""}</th>
                 ))}
               </tr>
             </thead>
@@ -2629,6 +2694,9 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
                       onChange={v=>setRimField(r.id,"notes",v)}
                       onDeactivate={()=>setRimCell(null)}
                       width={140} />
+                    </td>
+                    <td style={{ padding:"4px 8px",fontSize:11,color:"#7a8ab0",whiteSpace:"nowrap" }}>
+                      {r.created_at ? new Date(r.created_at).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"2-digit"}) : "—"}
                     </td>
                     <td style={{ padding:"6px 8px" }}>
                       <button onClick={()=>setConfirmDelete(r)} className="tap-btn" style={{ padding:"5px 8px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12 }}>🗑️</button>
