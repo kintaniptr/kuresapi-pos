@@ -1660,7 +1660,19 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
 
 // ─── STOCK MOVES ──────────────────────────────────────────────────────────────
 // ─── STOCK MOVE FORM ─────────────────────────────────────────────────────────
-function StockMoveForm({ form, setForm, items, saving, onSave, onCancel, showCancel }) {
+function StockMoveForm({ items, onSave, onCancel, showCancel }) {
+  // State lokal — tidak bergantung parent, jadi focus tidak hilang saat ketik
+  const [form, setForm] = useState({ item_id: "", direction: "in", qty: "", note: "" });
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!form.item_id || !form.qty) return;
+    setSaving(true);
+    await onSave(form);
+    setForm({ item_id: "", direction: "in", qty: "", note: "" });
+    setSaving(false);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -1695,8 +1707,8 @@ function StockMoveForm({ form, setForm, items, saving, onSave, onCancel, showCan
           style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:14 }} />
       </div>
       <div style={{ display:"flex", gap:8 }}>
-        <button onClick={onSave} disabled={saving} className="tap-btn"
-          style={{ flex:1, padding:"13px 0", background:saving?"#ddd":"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:12, fontWeight:700, cursor:saving?"not-allowed":"pointer", fontSize:15 }}>
+        <button onClick={save} disabled={saving || !form.item_id || !form.qty} className="tap-btn"
+          style={{ flex:1, padding:"13px 0", background:(saving||!form.item_id||!form.qty)?"#ddd":"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:12, fontWeight:700, cursor:(saving||!form.item_id||!form.qty)?"not-allowed":"pointer", fontSize:15 }}>
           {saving ? "⏳ Menyimpan..." : "💾 Simpan"}
         </button>
         {showCancel && (
@@ -1711,8 +1723,6 @@ function StockMoveForm({ form, setForm, items, saving, onSave, onCancel, showCan
 }
 
 function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
-  const [form, setForm] = useState({ item_id: "", direction: "in", qty: "", note: "" });
-  const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -1723,55 +1733,54 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
-  const save = async () => {
-    if (!form.item_id || !form.qty) return showToast("Pilih item dan isi qty", "error");
-    setSaving(true);
+  const handleSave = async (form) => {
     try {
       const item = items.find(i => i.id === form.item_id);
       const qty = Number(form.qty);
       const newStock = form.direction === "in" ? (item.stock || 0) + qty : Math.max(0, (item.stock || 0) - qty);
       await api("kr_stock_moves", { method: "POST", body: JSON.stringify({ ...form, qty }), prefer: "return=minimal" });
       await api(`kr_items?id=eq.${form.item_id}`, { method: "PATCH", body: JSON.stringify({ stock: newStock }), prefer: "return=minimal" });
-      setForm({ item_id: "", direction: "in", qty: "", note: "" });
       setShowForm(false);
       onRefresh();
       showToast(`${form.direction === "in" ? "📥 Stok masuk" : "📤 Stok keluar"} dicatat!`);
     } catch (e) { showToast("Error: " + e.message, "error"); }
-    setSaving(false);
   };
 
   const itemMap = Object.fromEntries(items.map(i => [i.id, i]));
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal title="Hapus Mutasi?" message={`Hapus catatan mutasi ini dari database? Stok tidak akan otomatis dikembalikan.`} onConfirm={() => deleteMove(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDelete && <ConfirmModal title="Hapus Mutasi?" message="Hapus catatan mutasi ini dari database? Stok tidak akan otomatis dikembalikan." onConfirm={() => deleteMove(confirmDelete)} onCancel={() => setConfirmDelete(null)} />}
+
       {isMobile ? (
+        /* ── Mobile: form toggle ── */
         <>
-          <button onClick={() => setShowForm(true)} className="tap-btn" style={{ width: "100%", padding: "13px 0", background: "linear-gradient(135deg,#ee4181,#2d4ba0)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 700, cursor: "pointer", fontSize: 15, marginBottom: 16 }}>+ Catat Mutasi Stok</button>
-          {showForm && (
-            <div style={{ ...CARD, padding: 18, marginBottom: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14, color: "#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
-              <StockMoveForm form={form} setForm={setForm} items={items} saving={saving} onSave={save} onCancel={() => setShowForm(false)} showCancel={isMobile} />
+          {!showForm ? (
+            <button onClick={() => setShowForm(true)} className="tap-btn"
+              style={{ width:"100%", padding:"13px 0", background:"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:12, fontWeight:700, cursor:"pointer", fontSize:15, marginBottom:16 }}>
+              + Catat Mutasi Stok
+            </button>
+          ) : (
+            <div style={{ ...CARD, padding:18, marginBottom:16 }}>
+              <div style={{ fontWeight:700, fontSize:15, marginBottom:14, color:"#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
+              <StockMoveForm items={items} onSave={handleSave} onCancel={() => setShowForm(false)} showCancel />
             </div>
           )}
+          <div style={{ fontWeight:700, fontSize:15, marginBottom:10, color:"#1a2a5e" }}>📋 Riwayat Mutasi</div>
+          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} />
         </>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 24 }}>
-          <div style={{ ...CARD, padding: 22, height: "fit-content" }}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 18, color: "#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
-            <StockMoveForm form={form} setForm={setForm} items={items} saving={saving} onSave={save} onCancel={() => setShowForm(false)} showCancel={isMobile} />
+        /* ── Desktop: side-by-side, form always visible ── */
+        <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:24 }}>
+          <div style={{ ...CARD, padding:22, height:"fit-content" }}>
+            <div style={{ fontWeight:800, fontSize:17, marginBottom:18, color:"#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
+            <StockMoveForm items={items} onSave={handleSave} onCancel={() => {}} />
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14, color: "#1a2a5e" }}>📋 Riwayat</div>
+            <div style={{ fontWeight:800, fontSize:17, marginBottom:14, color:"#1a2a5e" }}>📋 Riwayat</div>
             <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} />
           </div>
         </div>
-      )}
-      {isMobile && (
-        <>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#1a2a5e" }}>📋 Riwayat Mutasi</div>
-          <MovesList moves={moves} itemMap={itemMap} isMobile={isMobile} onDelete={setConfirmDelete} />
-        </>
       )}
     </div>
   );
@@ -2373,13 +2382,19 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
       )}
 
       {/* Bulk DELETE bar */}
-      {selected.size > 0 && (
-        <div style={{ ...CARD, padding: "10px 16px", marginBottom: 12, background: "#fde8f0", border: "1.5px solid #f5a8c4", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#ee4181" }}>✓ {selected.size} item dipilih</span>
-          <button onClick={() => setConfirmBulk(true)} className="tap-btn" style={{ padding: "6px 14px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🗑️ Hapus Terpilih</button>
-          <button onClick={() => setSelected(new Set())} className="tap-btn" style={{ padding: "6px 12px", background: "#fff", color: "#7a8ab0", border: "1.5px solid #d0e5f5", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Batal</button>
-        </div>
-      )}
+      {selected.size > 0 && (() => {
+        const selectedTotal = reimburses.filter(r => selected.has(r.id)).reduce((s, r) => s + (r.amount||0), 0);
+        return (
+          <div style={{ ...CARD, padding:"10px 16px", marginBottom:12, background:"#fde8f0", border:"1.5px solid #f5a8c4", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <div style={{ flex:1 }}>
+              <span style={{ fontSize:13, fontWeight:700, color:"#ee4181" }}>✓ {selected.size} item dipilih</span>
+              <span style={{ fontSize:13, color:"#ee4181", marginLeft:8 }}>· Total: <b>{formatRp(selectedTotal)}</b></span>
+            </div>
+            <button onClick={() => setConfirmBulk(true)} className="tap-btn" style={{ padding:"6px 14px", background:"#ef4444", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer", fontSize:13 }}>🗑️ Hapus Terpilih</button>
+            <button onClick={() => setSelected(new Set())} className="tap-btn" style={{ padding:"6px 12px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d0e5f5", borderRadius:8, fontWeight:600, cursor:"pointer", fontSize:13 }}>Batal</button>
+          </div>
+        );
+      })()}
 
       {/* Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
