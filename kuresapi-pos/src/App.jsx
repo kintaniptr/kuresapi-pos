@@ -385,63 +385,77 @@ function LoginScreen({ onLogin, isMobile }) {
 // ─── VARIANT PICKER MODAL ────────────────────────────────────────────────────
 function VariantPickerModal({ item, variants, onConfirm, onCancel }) {
   const bq = item.bundle_qty || 1;
-  const [counts, setCounts] = useState({}); // { variantId: qty }
+  const isBundle = bq > 1;
+  const [counts, setCounts] = useState({});
+
   const total = Object.values(counts).reduce((s, n) => s + n, 0);
   const remaining = bq - total;
 
-  const inc = (id) => {
-    if (remaining <= 0) return;
-    setCounts(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
-  };
-  const dec = (id) => {
-    if (!counts[id]) return;
-    setCounts(c => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
-  };
+  // Non-bundle: tap desain langsung confirm
+  if (!isBundle) {
+    return (
+      <div style={{ position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+        <div style={{ background:"#fff",borderRadius:20,padding:24,width:"100%",maxWidth:380,boxShadow:"0 20px 60px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontWeight:800,fontSize:17,color:"#1a2a5e",marginBottom:4 }}>🎨 Pilih Desain</div>
+          <div style={{ fontSize:13,color:"#7a8ab0",marginBottom:16 }}>{item.name} — tap untuk pilih</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:20 }}>
+            {variants.map(v => (
+              <button key={v.id} onClick={() => v.stock > 0 && onConfirm([{ id:v.id, name:v.name }])}
+                disabled={v.stock <= 0} className="tap-btn"
+                style={{ padding:"13px 16px",borderRadius:12,border:"2px solid #e8edf8",background:v.stock<=0?"#f5f5f5":"#fafbff",cursor:v.stock<=0?"not-allowed":"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",opacity:v.stock<=0?0.5:1 }}>
+                <span style={{ fontSize:15,fontWeight:600,color:"#1a2a5e" }}>{v.name}</span>
+                <span style={{ fontSize:12,color:v.stock<=0?"#ef4444":"#7a8ab0" }}>{v.stock<=0?"❌ Habis":`Sisa ${v.stock} pcs`}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={onCancel} className="tap-btn"
+            style={{ width:"100%",padding:"12px 0",background:"#fff",color:"#7a8ab0",border:"1.5px solid #d4c8e0",borderRadius:12,fontWeight:600,cursor:"pointer" }}>
+            Batal
+          </button>
+        </div>
+      </div>
+    );
+  }
 
+  // Bundle: pilih bq desain dengan counter +/-
+  const inc = (id, stock) => { if (remaining <= 0 || counts[id]>=stock) return; setCounts(c => ({ ...c, [id]: (c[id]||0)+1 })); };
+  const dec = (id) => { if (!counts[id]) return; setCounts(c => ({ ...c, [id]: Math.max(0,(c[id]||0)-1) })); };
   const confirm = () => {
     if (remaining !== 0) return;
-    const selected = variants
-      .filter(v => counts[v.id] > 0)
-      .flatMap(v => Array(counts[v.id]).fill({ id: v.id, name: v.name }));
+    const selected = variants.filter(v => counts[v.id]>0).flatMap(v => Array(counts[v.id]).fill({ id:v.id, name:v.name }));
     onConfirm(selected);
   };
 
   return (
     <div style={{ position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
       <div style={{ background:"#fff",borderRadius:20,padding:24,width:"100%",maxWidth:420,maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)" }}>
-        <div style={{ fontWeight:800,fontSize:17,color:"#1a2a5e",marginBottom:4 }}>🎨 Pilih Desain</div>
-        <div style={{ fontSize:13,color:"#7a8ab0",marginBottom:16 }}>
+        <div style={{ fontWeight:800,fontSize:17,color:"#1a2a5e",marginBottom:4 }}>🎨 Pilih Desain Bundle</div>
+        <div style={{ fontSize:13,color:"#7a8ab0",marginBottom:16,display:"flex",alignItems:"center",gap:8 }}>
           {item.name} — pilih <b>{bq} desain</b>
           {remaining > 0
-            ? <span style={{ marginLeft:8,background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"2px 8px",fontWeight:700 }}>{remaining} lagi</span>
-            : <span style={{ marginLeft:8,background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"2px 8px",fontWeight:700 }}>✓ Lengkap!</span>
-          }
+            ? <span style={{ background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"2px 8px",fontWeight:700 }}>{remaining} lagi</span>
+            : <span style={{ background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"2px 8px",fontWeight:700 }}>✓ Lengkap!</span>}
         </div>
-
         <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:20 }}>
           {variants.map(v => {
-            const cnt = counts[v.id] || 0;
-            const stockOk = v.stock > cnt;
+            const cnt = counts[v.id]||0;
             return (
               <div key={v.id} style={{ display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:12,border:`2px solid ${cnt>0?"#ee4181":"#e8edf8"}`,background:cnt>0?"#fde8f0":"#fafbff" }}>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:14,fontWeight:cnt>0?700:500,color:"#1a2a5e" }}>{v.name}</div>
-                  <div style={{ fontSize:11,color:v.stock<=0?"#ef4444":"#7a8ab0" }}>
-                    {v.stock<=0 ? "❌ Habis" : `Sisa ${v.stock} pcs`}
-                  </div>
+                  <div style={{ fontSize:11,color:v.stock<=0?"#ef4444":"#7a8ab0" }}>{v.stock<=0?"❌ Habis":`Sisa ${v.stock} pcs`}</div>
                 </div>
                 <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                   <button onClick={()=>dec(v.id)} disabled={!cnt} className="tap-btn"
                     style={{ width:32,height:32,border:"1.5px solid #d4c8e0",borderRadius:8,background:"#fde8f0",cursor:cnt?"pointer":"not-allowed",fontSize:16,color:"#ee4181",fontWeight:700,opacity:cnt?1:0.4 }}>−</button>
                   <span style={{ fontSize:15,fontWeight:700,minWidth:20,textAlign:"center",color:cnt>0?"#ee4181":"#c8d2e0" }}>{cnt}</span>
-                  <button onClick={()=>inc(v.id)} disabled={remaining<=0||!stockOk} className="tap-btn"
-                    style={{ width:32,height:32,border:"1.5px solid #d4c8e0",borderRadius:8,background:"#e4f3fd",cursor:(remaining>0&&stockOk)?"pointer":"not-allowed",fontSize:16,color:"#2d4ba0",fontWeight:700,opacity:(remaining>0&&stockOk)?1:0.4 }}>+</button>
+                  <button onClick={()=>inc(v.id,v.stock)} disabled={remaining<=0||cnt>=v.stock} className="tap-btn"
+                    style={{ width:32,height:32,border:"1.5px solid #d4c8e0",borderRadius:8,background:"#e4f3fd",cursor:(remaining>0&&cnt<v.stock)?"pointer":"not-allowed",fontSize:16,color:"#2d4ba0",fontWeight:700,opacity:(remaining>0&&cnt<v.stock)?1:0.4 }}>+</button>
                 </div>
               </div>
             );
           })}
         </div>
-
         <div style={{ display:"flex",gap:8 }}>
           <button onClick={confirm} disabled={remaining!==0} className="tap-btn"
             style={{ flex:2,padding:"13px 0",background:remaining===0?"linear-gradient(135deg,#ee4181,#2d4ba0)":"#ddd",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:remaining===0?"pointer":"not-allowed",fontSize:15 }}>
@@ -481,12 +495,12 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
 
   const addToCart = (item) => {
     const itemVariants = variants.filter(v => v.item_id === item.id);
-    // Buka picker hanya kalau bundle_qty > 1 DAN variants sudah dibuat
-    if ((item.bundle_qty || 1) > 1 && itemVariants.length > 0) {
+    // Buka picker kalau item punya variants (bundle atau non-bundle)
+    if (itemVariants.length > 0) {
       setVariantModal({ item });
       return;
     }
-    // Bundle tanpa variants / item biasa: langsung masuk keranjang
+    // Item tanpa variants: langsung masuk keranjang
     setCart(c => {
       const ex = c.find(x => x.id === item.id);
       if (ex) return c.map(x => x.id === item.id ? { ...x, qty: x.qty + 1 } : x);
@@ -580,29 +594,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
         </select>
       </div>
 
-      {/* ── Debug Bundle Panel ── */}
-      <details style={{ marginBottom: 12, fontSize: 11 }}>
-        <summary style={{ cursor: "pointer", padding: "5px 10px", background: "#f8faff", borderRadius: 8, border: "1px solid #e8edf8", color: "#7a8ab0", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          🔍 Debug bundle <span style={{ background: "#e8edf8", borderRadius: 4, padding: "1px 6px" }}>{variants.length} variants</span>
-        </summary>
-        <div style={{ marginTop: 6, padding: "10px 14px", background: "#f8faff", borderRadius: 10, border: "1px solid #e8edf8", lineHeight: 2 }}>
-          {items.filter(i => (i.bundle_qty||1) > 1).length === 0
-            ? <span style={{ color: "#ef4444", fontWeight: 600 }}>❌ Tidak ada item dengan bundle_qty &gt; 1 — set dulu di Inventory → Detail</span>
-            : items.filter(i => (i.bundle_qty||1) > 1).map(i => {
-                const iv = variants.filter(v => v.item_id === i.id);
-                return (
-                  <div key={i.id}>
-                    <b>{i.name}</b> — bundle: <b>{i.bundle_qty}</b> pcs, desain: <b>{iv.length}</b>
-                    {iv.length === 0
-                      ? <span style={{ color: "#ef4444" }}> ← belum ada desain! Tambah di Inventory → 🎨</span>
-                      : <span style={{ color: "#10b981" }}> ✓ {iv.map(v => v.name).join(", ")}</span>
-                    }
-                  </div>
-                );
-              })
-          }
-        </div>
-      </details>
+
 
       {/* Desktop: side-by-side. Mobile: products only + floating cart button */}
       {isMobile ? (
@@ -632,7 +624,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
                     {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>
                       {outOfStock ? "❌ Habis"
-                        : bq > 1 && !hasVariants ? <span style={{color:"#f59e0b"}}>⚙️ Setup desain dulu</span>
+                        
                         : bq > 1 ? `Sisa ${bundlesLeft} bundle`
                         : `Stok: ${totalStock}`}
                     </div>}
@@ -688,7 +680,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
                       {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>
                         {outOfStock ? "❌ Habis"
-                          : bq > 1 && !hasVariants ? <span style={{color:"#f59e0b"}}>⚙️ Setup desain dulu</span>
+                          
                           : bq > 1 ? (bundlesLeft <= 3 ? `⚠️ Sisa ${bundlesLeft} bundle` : `📦 Sisa ${bundlesLeft} bundle`)
                           : `📦 Stok: ${totalStock}`}
                       </div>}
