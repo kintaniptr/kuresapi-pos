@@ -2253,7 +2253,7 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
   const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const fileInputRef = useRef(null);
-  const [form, setForm] = useState({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" });
+  const [form, setForm] = useState({ expense_details: "", event: "", _lainnya: false, amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" });
 
   // ── Inline edit state ────────────────────────────────────────────────────
   const [rimEdits, setRimEdits]     = useState({}); // { [id]: { field: val } }
@@ -2290,8 +2290,12 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
     showToast(fail ? `⚠️ ${ok} tersimpan, ${fail} gagal` : `✅ ${ok} reimbursement diperbarui!`);
   };
 
-  const openNew = () => { setForm({ expense_details: "", event: "", amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
-  const openEdit = (r) => { setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "" }); setEditing(r.id); setShowForm(true); };
+  const openNew = () => { setForm({ expense_details: "", event: "", _lainnya: false, amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
+  const openEdit = (r) => {
+    const isPreset = ["Workshop", "Art Market", "", null, undefined].includes(r.event);
+    setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "", _lainnya: !isPreset });
+    setEditing(r.id); setShowForm(true);
+  };
 
   const toggleSelect = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleSelectAll = () => {
@@ -2473,15 +2477,21 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
         {/* Event dropdown */}
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Event</label>
-          <select value={["Workshop","Art Market","Lainnya"].includes(form.event) ? form.event : form.event ? "Lainnya" : ""}
-            onChange={e => setForm(f => ({ ...f, event: e.target.value === "Lainnya" ? "" : e.target.value }))}
+          <select value={form._lainnya ? "Lainnya" : form.event}
+            onChange={e => {
+              if (e.target.value === "Lainnya") {
+                setForm(f => ({ ...f, _lainnya: true, event: "" }));
+              } else {
+                setForm(f => ({ ...f, _lainnya: false, event: e.target.value }));
+              }
+            }}
             style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, background: "#fff" }}>
             <option value="">— Pilih event —</option>
             <option value="Workshop">🎨 Workshop</option>
             <option value="Art Market">🛍️ Art Market</option>
             <option value="Lainnya">✏️ Lainnya...</option>
           </select>
-          {(form.event === "" && form._lainnya) || (form.event && !["Workshop","Art Market",""].includes(form.event)) ? (
+          {form._lainnya ? (
             <input placeholder="Tulis nama event..." value={form.event}
               onChange={e => setForm(f => ({ ...f, event: e.target.value }))}
               style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box", marginTop: 8 }} />
