@@ -573,6 +573,31 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
           <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }}>🔍</span>
           <input placeholder="Cari produk..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "11px 12px 11px 34px", border: "1.5px solid #d4c8e0", borderRadius: 12, fontSize: 14, background: "#fff" }} />
         </div>
+
+      {/* ── DEBUG PANEL (hapus setelah confirmed working) ── */}
+      {process.env.NODE_ENV !== "production" || true ? (
+        <details style={{ marginBottom: 8, fontSize: 11, color: "#7a8ab0" }}>
+          <summary style={{ cursor: "pointer", padding: "4px 8px", background: "#f8faff", borderRadius: 6, border: "1px solid #e8edf8" }}>
+            🔍 Debug bundle ({variants.length} variants loaded)
+          </summary>
+          <div style={{ padding: "8px", background: "#f8faff", borderRadius: 6, marginTop: 4, lineHeight: 2 }}>
+            {items.filter(i => (i.bundle_qty||1) > 1).length === 0
+              ? <span style={{color:"#ef4444"}}>❌ Tidak ada item dengan bundle_qty &gt; 1</span>
+              : items.filter(i => (i.bundle_qty||1) > 1).map(i => {
+                  const iv = variants.filter(v => v.item_id === i.id);
+                  return (
+                    <div key={i.id}>
+                      <b>{i.name}</b> — bundle_qty: <b>{i.bundle_qty}</b>, variants: <b>{iv.length}</b>
+                      {iv.length === 0 && <span style={{color:"#ef4444"}}> ← perlu tambah desain!</span>}
+                      {iv.length > 0 && <span style={{color:"#10b981"}}> ✓ ({iv.map(v=>v.name).join(", ")})</span>}
+                    </div>
+                  );
+                })
+            }
+          </div>
+        </details>
+      ) : null}
+        </div>
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: "0 10px", border: "1.5px solid #d4c8e0", borderRadius: 12, fontSize: 13, background: "#fff", color: "#1a2a5e", minWidth: isMobile ? 90 : 140 }}>
           <option value="all">{isMobile ? "Semua" : "✨ Semua"}</option>
           <option value="product">{isMobile ? "Produk" : "📦 Produk"}</option>
