@@ -998,9 +998,10 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
       const payload = {
         ...orig,
         ...changes,
-        price: Number(changes.price ?? orig.price) || 0,
-        cost:  Number(changes.cost  ?? orig.cost)  || 0,
-        stock: Number(changes.stock ?? orig.stock) || 0,
+        price:      Number(changes.price      ?? orig.price)      || 0,
+        cost:       Number(changes.cost       ?? orig.cost)       || 0,
+        stock:      Number(changes.stock      ?? orig.stock)      || 0,
+        bundle_qty: Number(changes.bundle_qty ?? orig.bundle_qty) || 1,
       };
       try {
         await api(`kr_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(payload), prefer: "return=minimal" });
@@ -1091,18 +1092,18 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
 
   const filtered = items.filter(i => {
     const bq = i.bundle_qty || 1;
-    const bundles = i.type === "workshop" ? Infinity : Math.floor(getEffectiveStock(i) / bq);
-    if (filter === "low")  return i.type !== "workshop" && bundles > 0 && bundles <= 3;
-    if (filter === "out")  return i.type !== "workshop" && bundles <= 0;
+    const bundles = (i.type === "workshop" || i.type === "equipment") ? Infinity : Math.floor(getEffectiveStock(i) / bq);
+    if (filter === "low")  return i.type === "product" && bundles > 0 && bundles <= 3;
+    if (filter === "out")  return i.type === "product" && bundles <= 0;
     return filter === "all" || i.type === filter;
   });
   const stats = {
-    all: items.length,
-    product: items.filter(x=>x.type==="product").length,
-    workshop: items.filter(x=>x.type==="workshop").length,
+    all:       items.length,
+    product:   items.filter(x=>x.type==="product").length,
+    workshop:  items.filter(x=>x.type==="workshop").length,
     equipment: items.filter(x=>x.type==="equipment").length,
-    low: items.filter(x=>{ const bq=x.bundle_qty||1; const b=Math.floor(getEffectiveStock(x)/bq); return x.type!=="workshop"&&b>0&&b<=3; }).length,
-    out: items.filter(x=>{ const bq=x.bundle_qty||1; return x.type!=="workshop"&&Math.floor(getEffectiveStock(x)/bq)<=0; }).length,
+    low: items.filter(x=>{ const bq=x.bundle_qty||1; const b=Math.floor(getEffectiveStock(x)/bq); return x.type==="product"&&b>0&&b<=3; }).length,
+    out: items.filter(x=>{ const bq=x.bundle_qty||1; return x.type==="product"&&Math.floor(getEffectiveStock(x)/bq)<=0; }).length,
   };
 
 
@@ -1329,16 +1330,16 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                       <InlineCell val={getVal(item,"unit")} isDirty={!!inlineEdits[item.id]?.unit} isActive={activeCell?.id===item.id&&activeCell?.field==="unit"} onActivate={()=>setActiveCell({id:item.id,field:"unit"})} onChange={v=>setCell(item.id,"unit",v)} onDeactivate={()=>setActiveCell(null)} width={70} />
                     </td>
 
-                    {/* Bundle */}
+                    {/* Bundle — hanya produk yg bundle_qty > 1 */}
                     <td style={{ padding:"4px 8px" }}>
-                      {curType === "workshop"
+                      {curType !== "product"
                         ? <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:6}}>—</span>
                         : <InlineCell val={getVal(item,"bundle_qty")||1} isDirty={!!inlineEdits[item.id]?.bundle_qty} isActive={activeCell?.id===item.id&&activeCell?.field==="bundle_qty"} onActivate={()=>setActiveCell({id:item.id,field:"bundle_qty"})} onChange={v=>setCell(item.id,"bundle_qty",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="center" width={70}
                             format={v => {
                               const n = Number(v)||1;
                               return n > 1
                                 ? <span style={{background:"#fef9c3",border:"1px solid #f59e0b",borderRadius:6,padding:"2px 7px",fontSize:11,fontWeight:700,color:"#92400e"}}>{n} pcs</span>
-                                : <span style={{color:"#c8d2e0",fontSize:12}}>1 pcs</span>;
+                                : <span style={{color:"#c8d2e0",fontSize:12}}>—</span>;
                             }}
                           />
                       }
@@ -1363,18 +1364,26 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                       {curType === "workshop"
                         ? <span style={{color:"#d4c8e0",fontSize:13,paddingLeft:6}}>—</span>
                         : <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={80}
-                            format={v => { const n=Number(v)||0; const bq=Number(getVal(item,"bundle_qty"))||1; const low=n<bq; return <span style={{fontWeight:700,color:low?"#ef4444":n<=(bq*3)?"#f59e0b":"#10b981"}}>{n} pcs</span>; }}
+                            format={v => {
+                              const n = Number(v)||0;
+                              const bq = Number(getVal(item,"bundle_qty"))||1;
+                              // equipment: plain number, no color warning
+                              if (curType === "equipment") return <span style={{fontWeight:600,color:"#1a2a5e"}}>{n}</span>;
+                              const low = n < bq;
+                              return <span style={{fontWeight:700,color:low?"#ef4444":n<=(bq*3)?"#f59e0b":"#10b981"}}>{n} pcs</span>;
+                            }}
                           />
                       }
                     </td>
 
-                    {/* Sisa Bundle */}
+                    {/* Sisa Bundle — hanya produk */}
                     <td style={{ padding:"4px 8px",textAlign:"center" }}>
-                      {curType === "workshop"
+                      {curType !== "product"
                         ? <span style={{color:"#d4c8e0",fontSize:12}}>—</span>
                         : (() => {
-                            const stok = getEffectiveStock(item);
                             const bq   = Number(getVal(item,"bundle_qty"))||1;
+                            if (bq <= 1) return <span style={{color:"#d4c8e0",fontSize:12}}>—</span>;
+                            const stok = getEffectiveStock(item);
                             const sisa = Math.floor(stok / bq);
                             const hasV = getItemVariants(item.id).length > 0;
                             return (
@@ -1382,10 +1391,10 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                                 {sisa <= 0
                                   ? <span style={{background:"#fee2e2",color:"#ef4444",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>❌ Habis</span>
                                   : sisa <= 3
-                                  ? <span style={{background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>⚠️ {sisa} bundle</span>
-                                  : <span style={{background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>✅ {sisa} bundle</span>
+                                  ? <span style={{background:"#fef9c3",color:"#92400e",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>⚠️ {sisa}</span>
+                                  : <span style={{background:"#d1fae5",color:"#10b981",borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:700}}>✅ {sisa}</span>
                                 }
-                                {hasV && <span style={{fontSize:10,color:"#7a8ab0"}}>({stok} pcs)</span>}
+                                {hasV && <span style={{fontSize:10,color:"#7a8ab0"}}>/{stok}pcs</span>}
                               </div>
                             );
                           })()
@@ -1395,7 +1404,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     {/* Aksi */}
                     <td style={{ padding:"6px 8px" }}>
                       <div style={{ display:"flex",gap:5 }}>
-                        {curType !== "workshop" && (
+                        {curType === "product" && (
                           <button onClick={()=>toggleExpand(item.id)} className="tap-btn"
                             style={{ padding:"5px 9px",background:expandedItem===item.id?"#fef9c3":"#f8faff",color:expandedItem===item.id?"#92400e":"#7a8ab0",border:`1.5px solid ${expandedItem===item.id?"#f59e0b":"#d4c8e0"}`,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600 }}>
                             🎨 {getItemVariants(item.id).length > 0 ? getItemVariants(item.id).length : "+"}
