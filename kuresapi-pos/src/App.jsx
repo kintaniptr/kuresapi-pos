@@ -482,7 +482,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
               {filtered.map(item => {
                 const c = ITEM_COLORS[item.type];
                 const bq = item.bundle_qty || 1;
-                const itemVariants = variants.filter(v => v.item_id === item.id);
+                const itemVariants = bq > 1 ? variants.filter(v => v.item_id === item.id) : [];
                 const totalStock = itemVariants.length > 0
                   ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
                   : (item.stock || 0);
@@ -493,7 +493,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                     <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, display: "inline-block", marginBottom: 6, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, color: "#1a2a5e" }}>{item.name}</div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
-                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : `Sisa ${bundlesLeft} bundle`}</div>}
+                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>{outOfStock ? "❌ Habis" : bq > 1 ? `Sisa ${bundlesLeft} bundle` : `Stok: ${totalStock}`}</div>}
                   </button>
                 );
               })}
@@ -532,7 +532,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                 {filtered.map(item => {
                   const c = ITEM_COLORS[item.type];
                   const bq = item.bundle_qty || 1;
-                  const itemVariants = variants.filter(v => v.item_id === item.id);
+                  const itemVariants = bq > 1 ? variants.filter(v => v.item_id === item.id) : [];
                   const totalStock = itemVariants.length > 0
                     ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
                     : (item.stock || 0);
@@ -543,7 +543,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                       <div style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, display: "inline-block", marginBottom: 8, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, lineHeight: 1.35, color: "#1a2a5e" }}>{item.name}</div>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
-                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : bundlesLeft <= 3 ? `⚠️ Sisa ${bundlesLeft} bundle` : `📦 Sisa ${bundlesLeft} bundle`}</div>}
+                      {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 5 }}>{outOfStock ? "❌ Habis" : bq > 1 ? (bundlesLeft <= 3 ? `⚠️ Sisa ${bundlesLeft} bundle` : `📦 Sisa ${bundlesLeft} bundle`) : `📦 Stok: ${totalStock}`}</div>}
                     </button>
                   );
                 })}
@@ -1084,6 +1084,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
   };
 
   const getEffectiveStock = (item) => {
+    if ((item.bundle_qty || 1) <= 1) return item.stock || 0; // item biasa, pakai stok langsung
     const iv = getItemVariants(item.id);
     return iv.length > 0 ? iv.reduce((s, v) => s + (v.stock || 0), 0) : (item.stock || 0);
   };
@@ -1299,7 +1300,8 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                 const isDirtyRow = !!inlineEdits[item.id];
                 const curType   = getVal(item, "type");
                 return (
-                  <tr key={item.id} style={{ borderBottom:"1px solid #d4c8e0", background: isDirtyRow?"#fefce8":isSelected?"#fde8f0":"transparent" }}>
+                  <React.Fragment key={item.id}>
+                  <tr style={{ borderBottom:"1px solid #d4c8e0", background: isDirtyRow?"#fefce8":isSelected?"#fde8f0":"transparent" }}>
                     <td style={{ padding:"6px 14px" }}>
                       <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(item.id)} style={{ width:16,height:16,accentColor:"#ee4181",cursor:"pointer" }} />
                     </td>
@@ -1475,6 +1477,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                       </td>
                     </tr>
                   )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
