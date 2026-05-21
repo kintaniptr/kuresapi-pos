@@ -1067,6 +1067,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState(null);
   const [filter, setFilter]     = useState("all");
+  const [sortInv, setSortInv]   = useState({ key: "name", dir: 1 }); // key: name|price|stock, dir: 1=asc -1=desc
   const [form, setForm]         = useState({ name: "", type: "product", sku: "", price: "", cost: "", stock: "", unit: "pcs", bundle_qty: 1, description: "" });
   const [importing, setImporting] = useState(false);
   const [selected, setSelected]   = useState(new Set());
@@ -1249,6 +1250,12 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
     if (filter === "low")  return i.type === "product" && bundles > 0 && bundles <= 3;
     if (filter === "out")  return i.type === "product" && bundles <= 0;
     return filter === "all" || i.type === filter;
+  }).sort((a, b) => {
+    const { key, dir } = sortInv;
+    if (key === "price")  return (a.price - b.price) * dir;
+    if (key === "stock")  return (getEffectiveStock(a) - getEffectiveStock(b)) * dir;
+    if (key === "type")   return a.type.localeCompare(b.type) * dir;
+    return a.name.localeCompare(b.name) * dir; // default: name
   });
   const stats = {
     all:       items.length,
@@ -1430,19 +1437,20 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                   <input type="checkbox" checked={filtered.length>0&&selected.size===filtered.length} onChange={toggleSelectAll} style={{ width:16,height:16,accentColor:"#ee4181",cursor:"pointer" }} />
                 </th>
                 {[
-                  { label:"Nama",      w:200 },
-                  { label:"Tipe",      w:120 },
-                  { label:"SKU",       w:100 },
-                  { label:"Satuan",    w:80  },
-                  { label:"Bundle",    w:90  },
-                  { label:"Harga Jual",w:120 },
-                  { label:"Modal",     w:110 },
-                  { label:"Stok (pcs)",w:100 },
-                  { label:"Sisa Bundle",w:100},
-                  { label:"Aksi",      w:130 },
-                ].map(({ label, w }) => (
-                  <th key={label} style={{ padding:"12px 8px",textAlign:"left",fontSize:12,color:"#1a2a5e",fontWeight:700,borderBottom:"2px solid #d4c8e0",minWidth:w }}>
-                    {label}
+                  { label:"Nama",       w:200, key:"name"  },
+                  { label:"Tipe",       w:120, key:"type"  },
+                  { label:"SKU",        w:100, key:null    },
+                  { label:"Satuan",     w:80,  key:null    },
+                  { label:"Bundle",     w:90,  key:null    },
+                  { label:"Harga Jual", w:120, key:"price" },
+                  { label:"Modal",      w:110, key:null    },
+                  { label:"Stok (pcs)", w:100, key:"stock" },
+                  { label:"Sisa Bundle",w:100, key:null    },
+                  { label:"Aksi",       w:130, key:null    },
+                ].map(({ label, w, key }) => (
+                  <th key={label} onClick={key ? ()=>setSortInv(s=>({ key, dir: s.key===key ? -s.dir : 1 })) : undefined}
+                    style={{ padding:"12px 8px",textAlign:"left",fontSize:12,color:sortInv.key===key?"#2d4ba0":"#1a2a5e",fontWeight:700,borderBottom:"2px solid #d4c8e0",minWidth:w,cursor:key?"pointer":"default",userSelect:"none",whiteSpace:"nowrap" }}>
+                    {label}{key && sortInv.key===key ? (sortInv.dir===1?" ↑":" ↓") : key ? " ↕" : ""}
                   </th>
                 ))}
               </tr>
@@ -2550,6 +2558,7 @@ function Events({ events, onRefresh, showToast, isMobile }) {
 // ─── LAPORAN ──────────────────────────────────────────────────────────────────
 function Laporan({ orders, events, reimburses, items, isMobile }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [sortBy, setSortBy] = useState("omzet"); // omzet | profit | txCount | name
 
   const eventMap = Object.fromEntries((events||[]).map(e => [e.id, e]));
   const EVENT_TYPES_L = { art_market: "🛍️ Art Market", workshop: "🎨 Workshop", online: "🌐 Online", other: "📌 Lainnya" };
@@ -2558,10 +2567,15 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
   const eventStats = (events||[]).map(ev => {
     const evOrders = orders.filter(o => o.event_id === ev.id && o.status === "paid");
     const omzet = evOrders.reduce((s, o) => s + (o.total||0), 0);
+    // Match reimbursement ke event: cek nama lengkap (case-insensitive)
     const evReimburse = reimburses.filter(r => {
-      const name = (r.event||"").toLowerCase();
-      return name.includes(ev.name.toLowerCase().split(" ")[0]);
+      if (!r.event) return false;
+      const rName = r.event.toLowerCase().trim();
+      const evName = ev.name.toLowerCase().trim();
+      return rName === evName || rName.includes(evName) || evName.includes(rName);
     }).reduce((s, r) => s + (r.amount||0), 0);
+    // Profit = omzet - semua reimbursement event tsb
+    // Margin = profit / omzet × 100%
     const profit = omzet - evReimburse;
     const margin = omzet > 0 ? Math.round((profit / omzet) * 100) : 0;
     return { ev, omzet, reimburse: evReimburse, profit, margin, txCount: evOrders.length, orders: evOrders };
@@ -2575,8 +2589,18 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
   const totalReimburse = reimburses.filter(r => r.status === "unpaid").reduce((s, r) => s + (r.amount||0), 0);
   const totalProfit = eventStats.reduce((s, e) => s + e.profit, 0);
 
-  // Top items for selected event
-  const getTopItems = async (evId) => {};
+  // Produk terlaku dari semua orders (pakai item_name dari order_items via orders.items jika ada)
+  // Hitung dari kr_orders yang sudah ada — group by item lewat eventStats.orders
+  const allEventOrders = eventStats.flatMap(e => e.orders);
+  const allOrders = [...allEventOrders, ...noEventOrders];
+
+  // Sort events
+  const sortedStats = [...eventStats].sort((a, b) => {
+    if (sortBy === "name")    return a.ev.name.localeCompare(b.ev.name);
+    if (sortBy === "profit")  return b.profit - a.profit;
+    if (sortBy === "txCount") return b.txCount - a.txCount;
+    return b.omzet - a.omzet; // default: omzet
+  });
 
   const maxOmzet = Math.max(...eventStats.map(e => e.omzet), 1);
 
@@ -2597,7 +2621,7 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
         ))}
       </div>
 
-      {eventStats.length === 0 ? (
+      {sortedStats.length === 0 ? (
         <div style={{ ...CARD, padding: 60, textAlign: "center", color: "#7a8ab0" }}>
           <div style={{ fontSize: 48, marginBottom: 8 }}>📈</div>
           <div style={{ fontWeight: 600 }}>Belum ada data laporan</div>
@@ -2605,6 +2629,22 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
         </div>
       ) : (
         <>
+          {/* Sort controls */}
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap" }}>
+            <span style={{ fontSize:12,color:"#7a8ab0",fontWeight:600 }}>Urutkan:</span>
+            {[["omzet","💰 Omzet"],["profit","✨ Profit"],["txCount","🧾 Transaksi"],["name","🔤 Nama A-Z"]].map(([v,l]) => (
+              <button key={v} onClick={()=>setSortBy(v)} className="tap-btn"
+                style={{ padding:"5px 12px",borderRadius:20,border:`2px solid ${sortBy===v?"#2d4ba0":"#d4c8e0"}`,background:sortBy===v?"#e4f3fd":"#fff",color:sortBy===v?"#2d4ba0":"#7a8ab0",fontWeight:sortBy===v?700:500,cursor:"pointer",fontSize:12 }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* Profit margin info */}
+          <div style={{ ...CARD,padding:"10px 16px",marginBottom:14,background:"#f8faff",border:"1px solid #e8edf8",fontSize:12,color:"#7a8ab0",lineHeight:1.8 }}>
+            💡 <b>Profit bersih</b> = Omzet − Reimbursement event tersebut &nbsp;·&nbsp; <b>Margin</b> = Profit ÷ Omzet × 100%<br/>
+            Reimbursement dicocokkan berdasarkan nama event di form Reimbursement — pastikan nama eventnya sama persis.
+          </div>
           {/* Bar chart */}
           <div style={{ ...CARD, padding: 18, marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -2615,7 +2655,7 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 120, paddingBottom: 24, position: "relative" }}>
-              {eventStats.map(({ ev, omzet, profit }) => {
+              {sortedStats.map(({ ev, omzet, profit }) => {
                 const h = Math.round((omzet / maxOmzet) * 90);
                 const ph = omzet > 0 ? Math.max(2, Math.round((profit / omzet) * h)) : 0;
                 return (
@@ -2636,7 +2676,7 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
           {/* Event cards + detail */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : selectedEvent ? "1fr 320px" : "1fr", gap: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px,1fr))", gap: 12 }}>
-              {eventStats.map(({ ev, omzet, profit, reimburse, margin, txCount }) => {
+              {sortedStats.map(({ ev, omzet, profit, reimburse, margin, txCount }) => {
                 const t = EVENT_TYPES_L[ev.type] || "📌";
                 const isSelected = selectedEvent?.ev?.id === ev.id;
                 return (
@@ -2680,8 +2720,8 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
                   {[
                     { label: "Omzet kotor", value: formatRp(selectedEvent.omzet), color: "#ee4181" },
                     { label: "Reimbursement", value: formatRp(selectedEvent.reimburse), color: "#f59e0b" },
-                    { label: "Profit bersih", value: formatRp(selectedEvent.profit), color: "#10b981" },
-                    { label: "Transaksi", value: selectedEvent.txCount, color: "#2d4ba0" },
+                    { label: "Profit bersih", value: formatRp(selectedEvent.profit), color: selectedEvent.profit >= 0 ? "#10b981" : "#ef4444" },
+                    { label: "Margin", value: `${selectedEvent.margin}%`, color: selectedEvent.margin >= 50 ? "#10b981" : selectedEvent.margin >= 20 ? "#f59e0b" : "#ef4444" },
                   ].map(s => (
                     <div key={s.label} style={{ background: "#f8f8f8", borderRadius: 10, padding: "10px 12px" }}>
                       <div style={{ fontSize: 10, color: "#7a8ab0", marginBottom: 3 }}>{s.label}</div>
@@ -2689,7 +2729,35 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 12, color: "#7a8ab0", textAlign: "center", padding: "10px 0", borderTop: "1px dashed #d0e5f5" }}>
+                <div style={{ fontSize: 11, color: "#7a8ab0", marginBottom: 10, lineHeight: 1.6, padding: "8px 10px", background: "#fafbff", borderRadius: 8 }}>
+                  {selectedEvent.txCount} transaksi · Margin = Profit ÷ Omzet × 100%
+                  {selectedEvent.reimburse === 0 && <span style={{ color: "#f59e0b" }}> · ⚠️ Belum ada reimbursement (cek nama event)</span>}
+                </div>
+
+                {/* Top products for this event */}
+                {(() => {
+                  const evOrders = selectedEvent.orders || [];
+                  // Hitung dari order names — ambil semua item dari orders ini
+                  // Karena order_items tidak di-load di sini, tampilkan ringkasan per order
+                  if (evOrders.length === 0) return null;
+                  const totalItems = evOrders.reduce((s, o) => s + (o.items?.length || 0), 0);
+                  return (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#1a2a5e", marginBottom: 8 }}>🧾 {evOrders.length} Transaksi</div>
+                      <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                        {evOrders.slice(0, 8).map(o => (
+                          <div key={o.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "4px 8px", background: "#f8faff", borderRadius: 6 }}>
+                            <span style={{ color: "#1a2a5e" }}>{o.customer_name || "Umum"} · {o.order_no}</span>
+                            <span style={{ fontWeight: 700, color: "#ee4181" }}>{formatRp(o.total)}</span>
+                          </div>
+                        ))}
+                        {evOrders.length > 8 && <div style={{ fontSize: 11, color: "#7a8ab0", textAlign: "center" }}>+{evOrders.length - 8} lainnya di tab Penjualan</div>}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div style={{ fontSize: 12, color: "#7a8ab0", textAlign: "center", padding: "10px 0 0", borderTop: "1px dashed #d0e5f5", marginTop: 10 }}>
                   Klik event lain untuk lihat detailnya
                 </div>
               </div>
