@@ -158,7 +158,20 @@ const TABS = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState("pos");
+  const getHashTab = () => {
+    const hash = window.location.hash.replace("#", "");
+    return TABS.some(t => t.id === hash) ? hash : "pos";
+  };
+  const [tab, setTabState] = useState(getHashTab);
+  const setTab = (id) => {
+    setTabState(id);
+    window.location.hash = id;
+  };
+  useEffect(() => {
+    const onHash = () => setTabState(getHashTab());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   const [items, setItems] = useState([]);
   const [orders, setOrders] = useState([]);
   const [moves, setMoves] = useState([]);
@@ -1459,6 +1472,19 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📉 Modal</div>
                     <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
                   </div>
+                  {(() => {
+                    const cost = Number(getVal(item,"cost")) || 0;
+                    if (cost <= 0) return null;
+                    const rec = Math.ceil(cost * 1.3);
+                    const curPrice = Number(getVal(item,"price")) || 0;
+                    const isBelow = curPrice > 0 && curPrice < rec;
+                    return (
+                      <div>
+                        <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>💡 Rec. Harga +30%</div>
+                        <span style={{fontWeight:700,fontSize:13,color:isBelow?"#ef4444":"#10b981"}}>{formatRp(rec)}{isBelow ? " ⚠️ Harga jual di bawah rekomendasi" : " ✅"}</span>
+                      </div>
+                    );
+                  })()}
                   {item.type !== "workshop" && (
                     <div>
                       <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📦 Stok</div>
@@ -1500,6 +1526,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                   { label:"Bundle",     w:90,  key:null         },
                   { label:"Harga Jual", w:120, key:"price"      },
                   { label:"Modal",      w:110, key:null         },
+                  { label:"💡 Rec. +30%", w:120, key:null        },
                   { label:"Stok (pcs)", w:100, key:"stock"      },
                   { label:"Sisa Bundle",w:100, key:null         },
                   { label:"Ditambahkan",w:110, key:"created_at" },
@@ -1577,6 +1604,22 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                       />
                     </td>
 
+                    {/* Rec. +30% */}
+                    <td style={{ padding:"4px 8px" }}>
+                      {(() => {
+                        const cost = Number(getVal(item,"cost")) || 0;
+                        if (cost <= 0) return <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:4}}>—</span>;
+                        const rec = Math.ceil(cost * 1.3);
+                        const curPrice = Number(getVal(item,"price")) || 0;
+                        const isBelow = curPrice > 0 && curPrice < rec;
+                        return (
+                          <span style={{fontWeight:700,fontSize:13,color:isBelow?"#ef4444":"#10b981",background:isBelow?"#fee2e2":"#d1fae5",padding:"3px 8px",borderRadius:6,whiteSpace:"nowrap"}}>
+                            {formatRp(rec)}{isBelow ? " ⚠️" : " ✅"}
+                          </span>
+                        );
+                      })()}
+                    </td>
+
                     {/* Stok pcs */}
                     <td style={{ padding:"4px 8px" }}>
                       {curType === "workshop"
@@ -1642,7 +1685,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                   {/* ── Variant Panel (expanded row) ── */}
                   {expandedItem === item.id && (
                     <tr key={item.id + "-variants"}>
-                      <td colSpan={11} style={{ padding:"0 14px 14px 48px", background:"#fffbeb" }}>
+                      <td colSpan={12} style={{ padding:"0 14px 14px 48px", background:"#fffbeb" }}>
                         <div style={{ borderLeft:"3px solid #f59e0b",paddingLeft:16,paddingTop:12 }}>
                           <div style={{ fontWeight:700,fontSize:13,color:"#92400e",marginBottom:10 }}>
                             🎨 Desain untuk <b>{item.name}</b>
