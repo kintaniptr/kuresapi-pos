@@ -1473,15 +1473,18 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
                   </div>
                   {(() => {
-                    const cost = Number(getVal(item,"cost")) || 0;
-                    if (cost <= 0) return null;
-                    const rec = Math.ceil(cost * 1.3);
+                    const cost  = Number(getVal(item,"cost"))  || 0;
+                    const stock = Number(getVal(item,"stock")) || 0;
+                    if (cost <= 0 || stock <= 0) return null;
+                    const costPerPcs = cost / stock;
+                    const rec = Math.ceil(costPerPcs * 1.3);
                     const curPrice = Number(getVal(item,"price")) || 0;
                     const isBelow = curPrice > 0 && curPrice < rec;
                     return (
                       <div>
-                        <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>💡 Rec. Harga +30%</div>
-                        <span style={{fontWeight:700,fontSize:13,color:isBelow?"#ef4444":"#10b981"}}>{formatRp(rec)}{isBelow ? " ⚠️ Harga jual di bawah rekomendasi" : " ✅"}</span>
+                        <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>💡 Rec. per pcs +30%</div>
+                        <div style={{fontSize:11,color:"#b0b8cc",marginBottom:2}}>{formatRp(Math.ceil(costPerPcs))}/pcs modal</div>
+                        <span style={{fontWeight:700,fontSize:13,color:isBelow?"#ef4444":"#10b981"}}>{formatRp(rec)}{isBelow ? " ⚠️ Harga jual terlalu murah" : " ✅"}</span>
                       </div>
                     );
                   })()}
@@ -1607,15 +1610,20 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     {/* Rec. +30% */}
                     <td style={{ padding:"4px 8px" }}>
                       {(() => {
-                        const cost = Number(getVal(item,"cost")) || 0;
-                        if (cost <= 0) return <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:4}}>—</span>;
-                        const rec = Math.ceil(cost * 1.3);
+                        const cost  = Number(getVal(item,"cost"))  || 0;
+                        const stock = Number(getVal(item,"stock")) || 0;
+                        if (cost <= 0 || stock <= 0) return <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:4}}>—</span>;
+                        const costPerPcs = cost / stock;
+                        const rec = Math.ceil(costPerPcs * 1.3);
                         const curPrice = Number(getVal(item,"price")) || 0;
                         const isBelow = curPrice > 0 && curPrice < rec;
                         return (
-                          <span style={{fontWeight:700,fontSize:13,color:isBelow?"#ef4444":"#10b981",background:isBelow?"#fee2e2":"#d1fae5",padding:"3px 8px",borderRadius:6,whiteSpace:"nowrap"}}>
-                            {formatRp(rec)}{isBelow ? " ⚠️" : " ✅"}
-                          </span>
+                          <div style={{lineHeight:1.3}}>
+                            <span style={{fontWeight:700,fontSize:13,color:isBelow?"#ef4444":"#10b981",background:isBelow?"#fee2e2":"#d1fae5",padding:"3px 8px",borderRadius:6,whiteSpace:"nowrap"}}>
+                              {formatRp(rec)}{isBelow ? " ⚠️" : " ✅"}
+                            </span>
+                            <div style={{fontSize:10,color:"#b0b8cc",marginTop:2,paddingLeft:2}}>{formatRp(Math.ceil(costPerPcs))}/pcs modal</div>
+                          </div>
                         );
                       })()}
                     </td>
