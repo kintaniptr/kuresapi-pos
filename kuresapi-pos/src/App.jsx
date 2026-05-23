@@ -1473,6 +1473,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
                   </div>
                   {(() => {
+                    if (item.type === "equipment") return null;
                     const cost  = Number(getVal(item,"cost"))  || 0;
                     const stock = Number(getVal(item,"stock")) || 0;
                     if (cost <= 0 || stock <= 0) return null;
@@ -1610,6 +1611,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     {/* Rec. +30% */}
                     <td style={{ padding:"4px 8px" }}>
                       {(() => {
+                        if (curType === "equipment") return <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:4}}>—</span>;
                         const cost  = Number(getVal(item,"cost"))  || 0;
                         const stock = Number(getVal(item,"stock")) || 0;
                         if (cost <= 0 || stock <= 0) return <span style={{color:"#d4c8e0",fontSize:12,paddingLeft:4}}>—</span>;
