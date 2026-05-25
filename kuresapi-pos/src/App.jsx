@@ -1396,20 +1396,24 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
       )}
 
       {/* ── Toolbar ── */}
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap" }}>
-        <div style={{ display:"flex",gap:6,overflowX:"auto",paddingBottom:4,flex:1 }}>
+      <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:10 }}>
+        {/* Baris 1: tombol aksi */}
+        <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+          <button onClick={openNew} className="tap-btn" style={{ padding:"9px 14px",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0 }}>+ Tambah</button>
+          <button onClick={exportExcel} className="tap-btn" style={{ padding:"9px 14px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:13,flexShrink:0 }}>📥 Export</button>
+          <button onClick={()=>fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding:"9px 14px",background:"#fde8f0",color:"#ee4181",border:"1.5px solid #f5a8c4",borderRadius:12,fontWeight:600,cursor:importing?"not-allowed":"pointer",fontSize:13,flexShrink:0 }}>
+            {importing?"⏳ Import...":"📤 Import CSV"}
+          </button>
+          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{display:"none"}} />
+        </div>
+        {/* Baris 2: filter — scroll horizontal sendiri */}
+        <div style={{ display:"flex",gap:6,overflowX:"auto",paddingBottom:4 }}>
           {[["all","Semua"],["product","Produk"],["workshop","Workshop"],["equipment","Perlengkapan"],["low","⚠️ Hampir Habis"],["out","❌ Habis"]].map(([v,l]) => (
             <button key={v} onClick={()=>setFilter(v)} className="tap-btn" style={{ padding:"7px 12px",borderRadius:20,border:`2px solid ${filter===v?(v==="out"?"#ef4444":v==="low"?"#f59e0b":"#ee4181"):"#d4c8e0"}`,background:filter===v?(v==="out"?"#fee2e2":v==="low"?"#fef9c3":"#fde8f0"):"#fff",color:filter===v?(v==="out"?"#ef4444":v==="low"?"#92400e":"#ee4181"):"#7a8ab0",fontWeight:filter===v?700:500,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0 }}>
               {l} <span style={{opacity:0.7}}>({stats[v]||0})</span>
             </button>
           ))}
         </div>
-        <button onClick={openNew} className="tap-btn" style={{ padding:"9px 14px",background:"linear-gradient(135deg,#ee4181,#2d4ba0)",color:"#fff",border:"none",borderRadius:12,fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0 }}>+ Tambah</button>
-        <button onClick={exportExcel} className="tap-btn" style={{ padding:"9px 14px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:13,flexShrink:0 }}>📥 Export</button>
-        <button onClick={()=>fileInputRef.current?.click()} disabled={importing} className="tap-btn" style={{ padding:"9px 14px",background:"#fde8f0",color:"#ee4181",border:"1.5px solid #f5a8c4",borderRadius:12,fontWeight:600,cursor:importing?"not-allowed":"pointer",fontSize:13,flexShrink:0 }}>
-          {importing?"⏳ Import...":"📤 Import CSV"}
-        </button>
-        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{display:"none"}} />
       </div>
 
       {/* ── Sort bar ── */}
