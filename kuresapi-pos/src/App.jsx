@@ -283,7 +283,7 @@ export default function App() {
         {tab === "sales"     && <Sales orders={orders} items={items} events={events} onRefresh={loadOrders} showToast={showToast} isMobile={isMobile} />}
         {tab === "events"    && <Events events={events} onRefresh={loadEvents} showToast={showToast} isMobile={isMobile} />}
         {tab === "laporan"   && <Laporan orders={orders} orderItems={[]} events={events} reimburses={reimburses} items={items} isMobile={isMobile} />}
-        {tab === "reimburse" && <Reimbursement reimburses={reimburses} onRefresh={loadReimburses} showToast={showToast} isMobile={isMobile} />}
+        {tab === "reimburse" && <Reimbursement reimburses={reimburses} events={events} onRefresh={loadReimburses} showToast={showToast} isMobile={isMobile} />}
         {tab === "setup"     && user.role === "Admin" && <Setup setupSql={SETUP_SQL} showToast={showToast} onRefresh={() => { loadItems(); loadOrders(); loadMoves(); loadReimburses(); loadEvents(); }} />}
         {tab === "setup"     && user.role !== "Admin" && (
           <div style={{ textAlign: "center", padding: "80px 0", color: "#7a8ab0" }}>
@@ -1312,10 +1312,11 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
             })}
           </div>
         </div>
-        {[["name","Nama *","text","Nama produk / workshop..."],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Harga Modal (Rp)","number","0"],["stock","📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
+        {[["name","Nama *","text","Nama produk / workshop..."],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Total Modal / Harga Beli (Rp)","number","0"],["stock","📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
           <div key={k}>
             <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>{l}</label>
             <input type={t} placeholder={ph} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:15 }} />
+            {k==="cost" && <div style={{fontSize:11,color:"#7a8ab0",marginTop:3}}>💡 Isi total modal untuk semua stok (misal beli 50 pcs Rp 400.000 → isi 400000). Harga per pcs akan otomatis dihitung.</div>}
           </div>
         ))}
         {/* SKU with auto-generate */}
@@ -1469,8 +1470,13 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     <InlineCell val={getVal(item,"price")} isDirty={!!inlineEdits[item.id]?.price} isActive={activeCell?.id===item.id&&activeCell?.field==="price"} onActivate={()=>setActiveCell({id:item.id,field:"price"})} onChange={v=>setCell(item.id,"price",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
                   </div>
                   <div>
-                    <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📉 Modal</div>
-                    <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="left" format={v=>formatRp(Number(v)||0)} />
+                    <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📉 Modal/pcs</div>
+                    {(() => {
+                      const c = Number(getVal(item,"cost")) || 0;
+                      const s = Number(getVal(item,"stock")) || 0;
+                      const perPcs = s > 0 ? Math.round(c / s) : c;
+                      return <div style={{fontWeight:600,fontSize:13,color:"#7a8ab0"}}>{formatRp(perPcs)}{s > 0 && c > 0 ? <span style={{fontSize:10,color:"#b0b8cc",marginLeft:4}}>(total {formatRp(c)})</span> : null}</div>;
+                    })()}
                   </div>
                   {(() => {
                     if (item.type === "equipment") return null;
@@ -1603,9 +1609,17 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
 
                     {/* Modal */}
                     <td style={{ padding:"4px 8px" }}>
-                      <InlineCell val={getVal(item,"cost")} isDirty={!!inlineEdits[item.id]?.cost} isActive={activeCell?.id===item.id&&activeCell?.field==="cost"} onActivate={()=>setActiveCell({id:item.id,field:"cost"})} onChange={v=>setCell(item.id,"cost",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={100}
-                        format={v => <span style={{color:"#7a8ab0"}}>{formatRp(Number(v)||0)}</span>}
-                      />
+                      {(() => {
+                        const c = Number(getVal(item,"cost")) || 0;
+                        const s = Number(getVal(item,"stock")) || 0;
+                        const perPcs = s > 0 ? Math.round(c / s) : c;
+                        return (
+                          <div style={{lineHeight:1.3}}>
+                            <span style={{color:"#7a8ab0",fontWeight:600}}>{formatRp(perPcs)}</span>
+                            {s > 0 && c > 0 && <div style={{fontSize:10,color:"#b0b8cc",marginTop:1}}>total {formatRp(c)}</div>}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Rec. +30% */}
@@ -2297,7 +2311,7 @@ function RimCell({ val, isDirty, isActive, onActivate, onChange, onDeactivate, t
       background:isDirty?"#fef9c3":"transparent",border:isDirty?"1.5px dashed #f59e0b":"1.5px solid transparent" }}>{disp}</div>;
 }
 
-function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
+function Reimbursement({ reimburses, events, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
@@ -2345,7 +2359,8 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
 
   const openNew = () => { setForm({ expense_details: "", event: "", _lainnya: false, amount: "", pic: "", status: "unpaid", transaction_date: "", notes: "" }); setEditing(null); setShowForm(true); };
   const openEdit = (r) => {
-    const isPreset = ["Workshop", "Art Market", "", null, undefined].includes(r.event);
+    const eventNames = (events || []).map(ev => ev.name);
+    const isPreset = !r.event || eventNames.includes(r.event);
     setForm({ ...r, amount: r.amount || "", transaction_date: r.transaction_date || "", _lainnya: !isPreset });
     setEditing(r.id); setShowForm(true);
   };
@@ -2527,12 +2542,12 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
           </div>
         ))}
 
-        {/* Event dropdown */}
+        {/* Event dropdown — pakai events dari master Events */}
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 5, fontWeight: 600 }}>Event</label>
-          <select value={form._lainnya ? "Lainnya" : form.event}
+          <select value={form._lainnya ? "__lainnya__" : (form.event || "")}
             onChange={e => {
-              if (e.target.value === "Lainnya") {
+              if (e.target.value === "__lainnya__") {
                 setForm(f => ({ ...f, _lainnya: true, event: "" }));
               } else {
                 setForm(f => ({ ...f, _lainnya: false, event: e.target.value }));
@@ -2540,15 +2555,19 @@ function Reimbursement({ reimburses, onRefresh, showToast, isMobile }) {
             }}
             style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, background: "#fff" }}>
             <option value="">— Pilih event —</option>
-            <option value="Workshop">🎨 Workshop</option>
-            <option value="Art Market">🛍️ Art Market</option>
-            <option value="Lainnya">✏️ Lainnya...</option>
+            {(events || []).map(ev => (
+              <option key={ev.id} value={ev.name}>{ev.name}</option>
+            ))}
+            <option value="__lainnya__">✏️ Lainnya (tulis manual)...</option>
           </select>
-          {form._lainnya ? (
+          {form._lainnya && (
             <input placeholder="Tulis nama event..." value={form.event}
               onChange={e => setForm(f => ({ ...f, event: e.target.value }))}
               style={{ width: "100%", padding: "10px 13px", border: "1.5px solid #d0e5f5", borderRadius: 10, fontSize: 14, boxSizing: "border-box", marginTop: 8 }} />
-          ) : null}
+          )}
+          {(events||[]).length === 0 && (
+            <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 4 }}>⚠️ Belum ada event — buat event di tab Events dulu</div>
+          )}
         </div>
         <div>
           <label style={{ fontSize: 13, color: "#7a8ab0", display: "block", marginBottom: 6, fontWeight: 600 }}>Status</label>
@@ -2973,9 +2992,9 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
   const eventStats = (events||[]).map(ev => {
     const evOrders = orders.filter(o => o.event_id === ev.id && o.status === "paid");
     const omzet = evOrders.reduce((s, o) => s + (o.total||0), 0);
-    // Match reimbursement ke event: cek nama lengkap (case-insensitive)
+    // Match reimbursement ke event: cek nama lengkap (case-insensitive), HANYA yang belum dibayar
     const evReimburse = reimburses.filter(r => {
-      if (!r.event) return false;
+      if (!r.event || r.status !== "unpaid") return false;
       const rName = r.event.toLowerCase().trim();
       const evName = ev.name.toLowerCase().trim();
       return rName === evName || rName.includes(evName) || evName.includes(rName);
@@ -3016,7 +3035,7 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: isMobile ? 10 : 14, marginBottom: 20 }}>
         {[
           { label: "Total Omzet", value: formatRp(totalOmzet), icon: "📈", accent: "#ee4181" },
-          { label: "Total Reimburse", value: formatRp(totalReimburse), icon: "💸", accent: "#f59e0b" },
+          { label: "Belum Dibayar", value: formatRp(totalReimburse), icon: "💸", accent: "#f59e0b" },
           { label: "Estimasi Profit", value: formatRp(totalProfit), icon: "✨", accent: "#10b981" },
           { label: "Total Event", value: `${eventStats.length} event`, icon: "🎪", accent: "#2d4ba0" },
         ].map(s => (
@@ -3048,8 +3067,8 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
 
           {/* Profit margin info */}
           <div style={{ ...CARD,padding:"10px 16px",marginBottom:14,background:"#f8faff",border:"1px solid #e8edf8",fontSize:12,color:"#7a8ab0",lineHeight:1.8 }}>
-            💡 <b>Profit bersih</b> = Omzet − Reimbursement event tersebut &nbsp;·&nbsp; <b>Margin</b> = Profit ÷ Omzet × 100%<br/>
-            Reimbursement dicocokkan berdasarkan nama event di form Reimbursement — pastikan nama eventnya sama persis.
+            💡 <b>Profit bersih</b> = Omzet − Reimbursement event tersebut (status <b>Belum Dibayar</b>) &nbsp;·&nbsp; <b>Margin</b> = Profit ÷ Omzet × 100%<br/>
+            Reimbursement dicocokkan berdasarkan nama event — pastikan nama event di form Reimbursement sama persis.
           </div>
           {/* Bar chart */}
           <div style={{ ...CARD, padding: 18, marginBottom: 16 }}>
@@ -3065,7 +3084,7 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
                 const h = Math.round((omzet / maxOmzet) * 90);
                 const ph = omzet > 0 ? Math.max(2, Math.round((profit / omzet) * h)) : 0;
                 return (
-                  <div key={ev.id} onClick={() => setSelectedEvent(selectedEvent?.ev.id === ev.id ? null : { ev, omzet, profit, reimburse: eventStats.find(e=>e.ev.id===ev.id)?.reimburse||0, txCount: eventStats.find(e=>e.ev.id===ev.id)?.txCount||0, margin: eventStats.find(e=>e.ev.id===ev.id)?.margin||0 })}
+                  <div key={ev.id} onClick={() => setSelectedEvent(selectedEvent?.ev.id === ev.id ? null : { ev, omzet, profit, reimburse: eventStats.find(e=>e.ev.id===ev.id)?.reimburse||0, txCount: eventStats.find(e=>e.ev.id===ev.id)?.txCount||0, margin: eventStats.find(e=>e.ev.id===ev.id)?.margin||0, orders: eventStats.find(e=>e.ev.id===ev.id)?.orders||[] })}
                     style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", gap: 3, cursor: "pointer" }}>
                     <div style={{ fontSize: 10, color: "#1a2a5e", fontWeight: 600 }}>{formatRp(omzet).replace("Rp\xa0","").replace(".000","rb")}</div>
                     <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", justifyContent: "center" }}>
@@ -3125,7 +3144,7 @@ function Laporan({ orders, events, reimburses, items, isMobile }) {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
                   {[
                     { label: "Omzet kotor", value: formatRp(selectedEvent.omzet), color: "#ee4181" },
-                    { label: "Reimbursement", value: formatRp(selectedEvent.reimburse), color: "#f59e0b" },
+                    { label: "Reimburse (belum dibayar)", value: formatRp(selectedEvent.reimburse), color: "#f59e0b" },
                     { label: "Profit bersih", value: formatRp(selectedEvent.profit), color: selectedEvent.profit >= 0 ? "#10b981" : "#ef4444" },
                     { label: "Margin", value: `${selectedEvent.margin}%`, color: selectedEvent.margin >= 50 ? "#10b981" : selectedEvent.margin >= 20 ? "#f59e0b" : "#ef4444" },
                   ].map(s => (
