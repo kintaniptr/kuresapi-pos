@@ -563,7 +563,7 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
         body: JSON.stringify({ order_no: orderNo, customer_name: customer || "Umum", customer_phone: customerPhone, payment_method: payment, subtotal, discount, total, status: "paid", event_id: selectedEvent || null }),
       });
       await api("kr_order_items", { method: "POST", body: JSON.stringify(cart.map(x => ({ order_id: order.id, item_id: x.id, item_name: x.name, qty: x.qty, price: x.price, subtotal: x.price * x.qty }))), prefer: "return=minimal" });
-      const stockItems = cart.filter(x => x.type !== "workshop");
+      const stockItems = cart.filter(x => x.type !== "equipment");
       if (stockItems.length) {
         await api("kr_stock_moves", { method: "POST", body: JSON.stringify(stockItems.map(x => ({ item_id: x.id, direction: "out", qty: x.qty * (x.bundle_qty||1), note: `Penjualan ${orderNo}`, ref_id: order.id }))), prefer: "return=minimal" });
         for (const m of stockItems) {
@@ -642,17 +642,17 @@ function POS({ items, variants, events, onRefresh, showToast, isMobile }) {
                 const totalStock = hasVariants
                   ? itemVariants.reduce((s, v) => s + (v.stock || 0), 0)
                   : (item.stock || 0);
-                const bundlesLeft = item.type === "workshop" ? Infinity : Math.floor(totalStock / bq);
-                const outOfStock = item.type !== "workshop" && bundlesLeft <= 0;
+                const bundlesLeft = item.type === "equipment" ? Infinity : Math.floor(totalStock / bq);
+                const outOfStock = item.type !== "equipment" && bundlesLeft <= 0;
                 return (
                   <button key={item.id} onClick={() => { if (!outOfStock) { addToCart(item); } }} disabled={outOfStock} className="tap-btn" style={{ background: outOfStock ? "#f5f5f5" : "#fff", border: `2px solid ${outOfStock ? "#e5e5e5" : c.border}`, borderRadius: 14, padding: 12, cursor: outOfStock ? "not-allowed" : "pointer", textAlign: "left", opacity: outOfStock ? 0.5 : 1, width: "100%" }}>
                     <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, display: "inline-block", marginBottom: 6, background: c.bg, color: c.text, fontWeight: 700 }}>{c.label}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, color: "#1a2a5e" }}>{item.name}</div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#ee4181" }}>{formatRp(item.price)}{bq > 1 ? <span style={{fontSize:10,fontWeight:500,color:"#7a8ab0"}}> /{bq} pcs</span> : ""}</div>
-                    {item.type !== "workshop" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>
+                    {item.type !== "equipment" && <div style={{ fontSize: 11, color: bundlesLeft <= 3 ? "#ef4444" : "#7a8ab0", marginTop: 3 }}>
                       {outOfStock ? "❌ Habis"
-                        
                         : bq > 1 ? `Sisa ${bundlesLeft} bundle`
+                        : item.type === "workshop" ? `Sisa ${totalStock} slot`
                         : `Stok: ${totalStock}`}
                     </div>}
                   </button>
@@ -1307,12 +1307,13 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
               const c = ITEM_COLORS[v];
               return <button key={v} onClick={() => {
                 const newSku = (!form.sku || isAutoSku(form.sku)) ? generateSku(v, items) : form.sku;
-                setForm(f=>({...f, type:v, sku: newSku}));
+                const defaultUnit = v === "workshop" ? "slot" : "pcs";
+                setForm(f=>({...f, type:v, sku: newSku, unit: f.unit && f.unit !== "pcs" && f.unit !== "slot" ? f.unit : defaultUnit}));
               }} className="tap-btn" style={{ flex:1,padding:"10px 0",border:`2px solid ${form.type===v?c.text:"#d4c8e0"}`,borderRadius:10,background:form.type===v?c.bg:"#fff",color:form.type===v?c.text:"#7a8ab0",fontWeight:form.type===v?700:500,cursor:"pointer",fontSize:isMobile?11:12 }}>{l}</button>;
             })}
           </div>
         </div>
-        {[["name","Nama *","text","Nama produk / workshop..."],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Total Modal / Harga Beli (Rp)","number","0"],["stock","📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
+        {[["name","Nama *","text","Nama produk / workshop..."],["unit","Satuan","text","pcs, lembar, slot, dll"],["price","💰 Harga Jual (Rp) *","number","0"],["cost","📉 Total Modal / Harga Beli (Rp)","number","0"],["stock", form.type==="workshop" ? "🎟️ Jumlah Slot / Kapasitas" : "📦 Stok Awal (pcs fisik)","number","0"]].map(([k,l,t,ph]) => (
           <div key={k}>
             <label style={{ fontSize:13,color:"#7a8ab0",display:"block",marginBottom:5,fontWeight:600 }}>{l}</label>
             <input type={t} placeholder={ph} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} style={{ width:"100%",padding:"11px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:15 }} />
@@ -1499,10 +1500,16 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                       </div>
                     );
                   })()}
-                  {item.type !== "workshop" && (
+                  {item.type !== "workshop" ? (
                     <div>
                       <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>📦 Stok</div>
                       <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" />
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{fontSize:11,color:"#7a8ab0",marginBottom:3}}>🎟️ Sisa Slot</div>
+                      <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number"
+                        format={v => { const n=Number(v)||0; return <span style={{fontWeight:700,color:n<=0?"#ef4444":n<=3?"#f59e0b":"#10b981"}}>{n<=0?"❌ Penuh":`${n} slot`}</span>; }} />
                     </div>
                   )}
                   <div>
@@ -1648,21 +1655,20 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                       })()}
                     </td>
 
-                    {/* Stok pcs */}
+                    {/* Stok pcs / Slot */}
                     <td style={{ padding:"4px 8px" }}>
-                      {curType === "workshop"
-                        ? <span style={{color:"#d4c8e0",fontSize:13,paddingLeft:6}}>—</span>
-                        : <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={80}
-                            format={v => {
-                              const n = Number(v)||0;
-                              const bq = Number(getVal(item,"bundle_qty"))||1;
-                              // equipment: plain number, no color warning
-                              if (curType === "equipment") return <span style={{fontWeight:600,color:"#1a2a5e"}}>{n}</span>;
-                              const low = n < bq;
-                              return <span style={{fontWeight:700,color:low?"#ef4444":n<=(bq*3)?"#f59e0b":"#10b981"}}>{n} pcs</span>;
-                            }}
-                          />
-                      }
+                      <InlineCell val={getVal(item,"stock")} isDirty={!!inlineEdits[item.id]?.stock} isActive={activeCell?.id===item.id&&activeCell?.field==="stock"} onActivate={()=>setActiveCell({id:item.id,field:"stock"})} onChange={v=>setCell(item.id,"stock",v)} onDeactivate={()=>setActiveCell(null)} type="number" align="right" width={80}
+                        format={v => {
+                          const n = Number(v)||0;
+                          if (curType === "equipment") return <span style={{fontWeight:600,color:"#1a2a5e"}}>{n}</span>;
+                          if (curType === "workshop") {
+                            return <span style={{fontWeight:700,color:n<=0?"#ef4444":n<=3?"#f59e0b":"#10b981"}}>{n<=0?"❌ Penuh":`${n} slot`}</span>;
+                          }
+                          const bq = Number(getVal(item,"bundle_qty"))||1;
+                          const low = n < bq;
+                          return <span style={{fontWeight:700,color:low?"#ef4444":n<=(bq*3)?"#f59e0b":"#10b981"}}>{n} pcs</span>;
+                        }}
+                      />
                     </td>
 
                     {/* Sisa Bundle — hanya produk */}
