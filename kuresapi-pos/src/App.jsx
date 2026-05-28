@@ -2110,6 +2110,31 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
+  const handleEdit = async (move, newQty, newNote) => {
+    try {
+      const item = items.find(i => i.id === move.item_id);
+      const diff = newQty - move.qty; // positive = more, negative = less
+      // Update stock_move record
+      await api(`kr_stock_moves?id=eq.${move.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ qty: newQty, note: newNote }),
+        prefer: "return=minimal"
+      });
+      // Apply diff to item stock: if direction=in, diff goes same way; if out, invert
+      if (item && diff !== 0) {
+        const stockDelta = move.direction === "in" ? diff : -diff;
+        const newStock = Math.max(0, (item.stock || 0) + stockDelta);
+        await api(`kr_items?id=eq.${move.item_id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ stock: newStock }),
+          prefer: "return=minimal"
+        });
+      }
+      onRefresh();
+      showToast(`✅ Mutasi diperbarui! Stok ${diff !== 0 ? "ikut disesuaikan" : "tidak berubah"}`);
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
   const itemMap = Object.fromEntries(items.map(i => [i.id, i]));
 
   return (
@@ -2141,7 +2166,7 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
             </div>
           )}
           <div style={{ fontWeight:700, fontSize:15, marginBottom:10, color:"#1a2a5e" }}>📋 Riwayat Mutasi</div>
-          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} selected={selectedMoves} setSelected={setSelectedMoves} />
+          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} onEdit={handleEdit} selected={selectedMoves} setSelected={setSelectedMoves} />
         </>
       ) : (
         /* ── Desktop: side-by-side, form always visible ── */
@@ -2152,7 +2177,7 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
           </div>
           <div>
             <div style={{ fontWeight:800, fontSize:17, marginBottom:14, color:"#1a2a5e" }}>📋 Riwayat</div>
-            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} selected={selectedMoves} setSelected={setSelectedMoves} />
+            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} onEdit={handleEdit} selected={selectedMoves} setSelected={setSelectedMoves} />
           </div>
         </div>
       )}
@@ -2160,38 +2185,133 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
   );
 }
 
-function MovesList({ moves, itemMap, isMobile, onDelete, selected, setSelected }) {
+function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSelected }) {
   const toggle = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAll = () => setSelected(s => s.size === moves.length ? new Set() : new Set(moves.map(m => m.id)));
+  const [editingId, setEditingId] = useState(null);
+  const [editQty, setEditQty]     = useState("");
+  const [editNote, setEditNote]   = useState("");
+  const [saving, setSaving]       = useState(false);
+
+  const startEdit = (m) => {
+    setEditingId(m.id);
+    setEditQty(String(m.qty));
+    setEditNote(m.note || "");
+  };
+  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditNote(""); };
+
+  const saveEdit = async (m) => {
+    const newQty = Number(editQty);
+    if (!newQty || newQty < 0) return;
+    setSaving(true);
+    await onEdit(m, newQty, editNote);
+    cancelEdit();
+    setSaving(false);
+  };
+
+  const QtyDisplay = ({ m }) => {
+    const item = itemMap[m.item_id];
+    const bq = item?.bundle_qty || 1;
+    const pcs = m.qty;
+    if (bq > 1) {
+      const bundles = pcs / bq;
+      return (
+        <div>
+          <div style={{ fontSize:15, fontWeight:800, color: m.direction==="in"?"#10b981":"#ef4444" }}>{pcs} pcs</div>
+          <div style={{ fontSize:11, color:"#7a8ab0", marginTop:1 }}>{Number.isInteger(bundles) ? `${bundles} bundle` : `~${bundles.toFixed(1)} bundle`} × {bq}pcs</div>
+        </div>
+      );
+    }
+    return <span style={{ fontSize:15, fontWeight:800 }}>{pcs}</span>;
+  };
 
   if (moves.length === 0) return (
     <div style={{ ...CARD, padding: 40, textAlign: "center", color: "#7a8ab0" }}>
       <div style={{ fontSize: 36 }}>📋</div>Belum ada mutasi stok
     </div>
   );
+
   if (isMobile) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {moves.map(m => {
         const isSel = selected.has(m.id);
+        const isEditing = editingId === m.id;
+        const item = itemMap[m.item_id];
+        const bq = item?.bundle_qty || 1;
         return (
-          <div key={m.id} style={{ ...CARD, padding: 12, display: "flex", alignItems: "center", gap: 10, background: isSel ? "#fde8f0" : "#fff", border: `1.5px solid ${isSel ? "#f5a8c4" : "#d4c8e0"}` }}>
-            <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:17, height:17, accentColor:"#ee4181", cursor:"pointer", flexShrink:0 }} />
-            <span style={{ fontSize: 22 }}>{m.direction === "in" ? "📥" : "📤"}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{itemMap[m.item_id]?.name || "—"}</div>
-              <div style={{ fontSize: 11, color: "#7a8ab0" }}>{formatDate(m.created_at)} · {m.note || "—"}</div>
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444", flexShrink: 0 }}>
-              {m.direction === "in" ? "+" : "−"}{m.qty}
-            </div>
-            <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "6px 8px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>🗑️</button>
+          <div key={m.id} style={{ ...CARD, padding: 12, background: isEditing?"#fffbeb":isSel?"#fde8f0":"#fff", border:`1.5px solid ${isEditing?"#f59e0b":isSel?"#f5a8c4":"#d4c8e0"}` }}>
+            {!isEditing ? (
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:17, height:17, accentColor:"#ee4181", cursor:"pointer", flexShrink:0 }} />
+                <span style={{ fontSize: 22 }}>{m.direction === "in" ? "📥" : "📤"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item?.name || "—"}</div>
+                  <div style={{ fontSize: 11, color: "#7a8ab0" }}>{formatDate(m.created_at)} · {m.note || "—"}</div>
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444" }}>
+                    {m.direction === "in" ? "+" : "−"}{m.qty}
+                  </div>
+                  {bq > 1 && <div style={{ fontSize:10, color:"#7a8ab0" }}>{Math.round(m.qty/bq)} bundle</div>}
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
+                  <button onClick={() => startEdit(m)} className="tap-btn" style={{ padding:"5px 8px", background:"#e4f3fd", color:"#2d4ba0", border:"none", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>✏️</button>
+                  <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding:"5px 8px", background:"#fee2e2", color:"#ef4444", border:"none", borderRadius:7, cursor:"pointer", fontSize:12 }}>🗑️</button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontWeight:700, fontSize:13, color:"#92400e", marginBottom:10 }}>
+                  ✏️ Edit — {item?.name || "—"}
+                  {bq > 1 && <span style={{ fontSize:11, fontWeight:500, color:"#7a8ab0", marginLeft:6 }}>bundle_qty={bq} pcs</span>}
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  <div>
+                    <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600 }}>Qty (pcs)</label>
+                    {bq > 1 && <span style={{ fontSize:11, color:"#7a8ab0", marginLeft:6 }}>→ {Number(editQty)>0?`${Math.round(Number(editQty)/bq)} bundle`:""}</span>}
+                    <input type="number" min={0} value={editQty} onChange={e=>setEditQty(e.target.value)}
+                      style={{ width:"100%", padding:"9px 12px", border:"2px solid #f59e0b", borderRadius:8, fontSize:15, fontWeight:700, marginTop:4 }} />
+                    {bq > 1 && (
+                      <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap" }}>
+                        {[1,2,3,5,10].map(n => (
+                          <button key={n} onClick={()=>setEditQty(String(n*bq))} className="tap-btn"
+                            style={{ padding:"4px 10px", background:Number(editQty)===n*bq?"#fef9c3":"#f8faff", border:`1.5px solid ${Number(editQty)===n*bq?"#f59e0b":"#d4c8e0"}`, borderRadius:6, fontSize:12, fontWeight:600, cursor:"pointer", color:"#92400e" }}>
+                            {n}x = {n*bq}pcs
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600 }}>Keterangan</label>
+                    <input value={editNote} onChange={e=>setEditNote(e.target.value)}
+                      style={{ width:"100%", padding:"9px 12px", border:"1.5px solid #d4c8e0", borderRadius:8, fontSize:13, marginTop:4 }} />
+                  </div>
+                  <div style={{ background:"#fff8e6", border:"1px solid #f59e0b", borderRadius:8, padding:"8px 10px", fontSize:12, color:"#92400e" }}>
+                    ⚠️ Selisih qty akan diterapkan ke stok item. Arah: <b>{m.direction === "in" ? "Masuk (+)" : "Keluar (−)"}</b>
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>saveEdit(m)} disabled={saving||!editQty} className="tap-btn"
+                      style={{ flex:1, padding:"10px 0", background:saving?"#ddd":"linear-gradient(135deg,#10b981,#059669)", color:"#fff", border:"none", borderRadius:10, fontWeight:700, cursor:saving?"not-allowed":"pointer", fontSize:14 }}>
+                      {saving?"⏳ Menyimpan...":"💾 Simpan"}
+                    </button>
+                    <button onClick={cancelEdit} className="tap-btn"
+                      style={{ padding:"10px 16px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:10, fontWeight:600, cursor:"pointer", fontSize:14 }}>
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
     </div>
   );
+
+  // Desktop table
   return (
-    <div style={{ ...CARD, overflow: "hidden" }}>
+    <div style={{ ...CARD, overflow: "visible" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "linear-gradient(135deg,#e4f3fd,#fadeeb)" }}>
@@ -2199,7 +2319,7 @@ function MovesList({ moves, itemMap, isMobile, onDelete, selected, setSelected }
               <input type="checkbox" checked={moves.length > 0 && selected.size === moves.length} onChange={toggleAll}
                 style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
             </th>
-            {["Waktu","Item","Arah","Qty","Keterangan",""].map(h => (
+            {["Waktu","Item","Arah","Qty (pcs)","Keterangan","Aksi"].map(h => (
               <th key={h} style={{ padding: "11px 8px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d4c8e0" }}>{h}</th>
             ))}
           </tr>
@@ -2207,22 +2327,86 @@ function MovesList({ moves, itemMap, isMobile, onDelete, selected, setSelected }
         <tbody>
           {moves.map(m => {
             const isSel = selected.has(m.id);
+            const isEditing = editingId === m.id;
+            const item = itemMap[m.item_id];
+            const bq = item?.bundle_qty || 1;
             return (
-              <tr key={m.id} style={{ borderBottom: "1px solid #d4c8e0", background: isSel ? "#fde8f0" : "transparent" }}>
+              <React.Fragment key={m.id}>
+              <tr style={{ borderBottom: isEditing?"none":"1px solid #d4c8e0", background: isEditing?"#fffbeb":isSel?"#fde8f0":"transparent" }}>
                 <td style={{ padding:"8px 14px" }}>
                   <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
                 </td>
-                <td style={{ padding: "10px 8px", fontSize: 12, color: "#7a8ab0" }}>{formatDate(m.created_at)}</td>
-                <td style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600 }}>{itemMap[m.item_id]?.name || "—"}</td>
+                <td style={{ padding: "10px 8px", fontSize: 12, color: "#7a8ab0", whiteSpace:"nowrap" }}>{formatDate(m.created_at)}</td>
+                <td style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600 }}>{item?.name || "—"}</td>
                 <td style={{ padding: "10px 8px" }}>
                   <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: m.direction === "in" ? "#d1fae5" : "#fee2e2", color: m.direction === "in" ? "#10b981" : "#ef4444" }}>{m.direction === "in" ? "📥 Masuk" : "📤 Keluar"}</span>
                 </td>
-                <td style={{ padding: "10px 8px", fontSize: 15, fontWeight: 800 }}>{m.qty}</td>
+                <td style={{ padding: "10px 8px" }}>
+                  <QtyDisplay m={m} />
+                </td>
                 <td style={{ padding: "10px 8px", fontSize: 13, color: "#7a8ab0" }}>{m.note || "—"}</td>
                 <td style={{ padding: "8px 8px" }}>
-                  <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 9px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                  <div style={{ display:"flex", gap:5 }}>
+                    <button onClick={() => isEditing ? cancelEdit() : startEdit(m)} className="tap-btn"
+                      style={{ padding:"5px 9px", background:isEditing?"#fef9c3":"#e4f3fd", color:isEditing?"#92400e":"#2d4ba0", border:`1.5px solid ${isEditing?"#f59e0b":"transparent"}`, borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                      {isEditing?"✕ Batal":"✏️"}
+                    </button>
+                    <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 9px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                  </div>
                 </td>
               </tr>
+              {isEditing && (
+                <tr style={{ borderBottom: "2px solid #f59e0b" }}>
+                  <td colSpan={7} style={{ padding:"0 14px 14px 54px", background:"#fffbeb" }}>
+                    <div style={{ borderLeft:"3px solid #f59e0b", paddingLeft:16, paddingTop:12 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:"#92400e", marginBottom:10 }}>
+                        ✏️ Edit mutasi — <b>{item?.name}</b>
+                        {bq > 1 && <span style={{ fontWeight:500, color:"#7a8ab0", marginLeft:8 }}>bundle_qty = {bq} pcs/bundle</span>}
+                      </div>
+                      <div style={{ display:"flex", gap:16, alignItems:"flex-start", flexWrap:"wrap" }}>
+                        <div>
+                          <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600, display:"block", marginBottom:4 }}>Qty (pcs)</label>
+                          <input type="number" min={0} value={editQty} onChange={e=>setEditQty(e.target.value)}
+                            style={{ width:100, padding:"8px 10px", border:"2px solid #f59e0b", borderRadius:8, fontSize:16, fontWeight:700, textAlign:"center", background:"#fef9c3" }} />
+                          {bq > 1 && (
+                            <div style={{ marginTop:6 }}>
+                              <div style={{ fontSize:11, color:"#92400e", marginBottom:6, fontWeight:600 }}>Preset bundle:</div>
+                              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                                {[1,2,3,4,5,6,8,10].map(n => (
+                                  <button key={n} onClick={()=>setEditQty(String(n*bq))} className="tap-btn"
+                                    style={{ padding:"4px 9px", background:Number(editQty)===n*bq?"#fef9c3":"#fff", border:`1.5px solid ${Number(editQty)===n*bq?"#f59e0b":"#d4c8e0"}`, borderRadius:6, fontSize:12, fontWeight:Number(editQty)===n*bq?700:500, cursor:"pointer", color:"#92400e" }}>
+                                    {n}× = {n*bq} pcs
+                                  </button>
+                                ))}
+                              </div>
+                              {Number(editQty) > 0 && <div style={{ fontSize:12, color:"#10b981", fontWeight:600, marginTop:6 }}>= {Math.round(Number(editQty)/bq)} bundle</div>}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ flex:1, minWidth:180 }}>
+                          <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600, display:"block", marginBottom:4 }}>Keterangan</label>
+                          <input value={editNote} onChange={e=>setEditNote(e.target.value)} placeholder="Keterangan (opsional)"
+                            style={{ width:"100%", padding:"9px 12px", border:"1.5px solid #d4c8e0", borderRadius:8, fontSize:13 }} />
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:12, flexWrap:"wrap" }}>
+                        <div style={{ background:"#fff8e6", border:"1px solid #f59e0b", borderRadius:8, padding:"7px 12px", fontSize:12, color:"#92400e" }}>
+                          ⚠️ Selisih {Number(editQty) - m.qty > 0 ? "+" : ""}{Number(editQty) - m.qty} pcs akan {m.direction==="in"?"ditambah ke":"dikurangi dari"} stok
+                        </div>
+                        <button onClick={()=>saveEdit(m)} disabled={saving||!editQty||Number(editQty)<0} className="tap-btn"
+                          style={{ padding:"9px 20px", background:saving?"#ddd":"linear-gradient(135deg,#10b981,#059669)", color:"#fff", border:"none", borderRadius:10, fontWeight:700, cursor:(saving||!editQty||Number(editQty)<0)?"not-allowed":"pointer", fontSize:14 }}>
+                          {saving?"⏳ Menyimpan...":"💾 Simpan Perubahan"}
+                        </button>
+                        <button onClick={cancelEdit} className="tap-btn"
+                          style={{ padding:"9px 14px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:10, fontWeight:600, cursor:"pointer", fontSize:14 }}>
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             );
           })}
         </tbody>
