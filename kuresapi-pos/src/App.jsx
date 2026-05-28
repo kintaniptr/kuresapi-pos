@@ -279,7 +279,7 @@ export default function App() {
       <div style={{ padding: isMobile ? "16px" : "28px", maxWidth: 1320, margin: "0 auto" }}>
         {tab === "pos"       && <POS items={items} variants={variants} events={events} onRefresh={() => { loadItems(); loadOrders(); loadVariants(); }} showToast={showToast} isMobile={isMobile} />}
         {tab === "inventory" && <Inventory items={items} variants={variants} onRefresh={() => { loadItems(); loadVariants(); }} showToast={showToast} isMobile={isMobile} />}
-        {tab === "stock"     && <StockMoves items={items} moves={moves} onRefresh={() => { loadItems(); loadMoves(); }} showToast={showToast} isMobile={isMobile} />}
+        {tab === "stock"     && <StockMoves items={items} variants={variants} moves={moves} onRefresh={() => { loadItems(); loadMoves(); loadVariants(); }} showToast={showToast} isMobile={isMobile} />}
         {tab === "sales"     && <Sales orders={orders} items={items} events={events} onRefresh={loadOrders} showToast={showToast} isMobile={isMobile} />}
         {tab === "events"    && <Events events={events} onRefresh={loadEvents} showToast={showToast} isMobile={isMobile} />}
         {tab === "laporan"   && <Laporan orders={orders} orderItems={[]} events={events} reimburses={reimburses} items={items} isMobile={isMobile} />}
@@ -1361,6 +1361,67 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
           <button onClick={()=>setShowForm(false)} className="tap-btn" style={{ flex:1,padding:"14px 0",background:"#fff",color:"#1a2a5e",border:"1.5px solid #d4c8e0",borderRadius:12,fontWeight:600,cursor:"pointer",fontSize:15 }}>Batal</button>
         </div>
       </div>
+
+      {/* ── Variant Management (only when editing a product) ── */}
+      {editing && form.type === "product" && (
+        <div style={{ ...CARD, padding:isMobile?18:28, marginTop:18 }}>
+          <div style={{ fontWeight:800, fontSize:16, color:"#92400e", marginBottom:6 }}>🎨 Kelola Desain / Variasi</div>
+          <div style={{ fontSize:13, color:"#7a8ab0", marginBottom:14 }}>Tambah atau ubah stok per desain untuk item ini.</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:12 }}>
+            {getItemVariants(editing).map(v => {
+              const editVal = variantEdits[v.id];
+              const isDirty = editVal !== undefined;
+              const curStock = isDirty ? editVal : v.stock;
+              return (
+                <div key={v.id} style={{ display:"flex",alignItems:"center",gap:10,background:"#fff",border:`2px solid ${isDirty?"#f59e0b":"#e8edf8"}`,borderRadius:10,padding:"10px 12px" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14,fontWeight:700,color:"#1a2a5e" }}>{v.name}</div>
+                    <div style={{ fontSize:11,color:v.stock<=0?"#ef4444":"#7a8ab0" }}>{v.stock<=0?"❌ Habis":`Sisa ${v.stock} pcs`}</div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ fontSize:12,color:"#7a8ab0" }}>Stok:</span>
+                    <input type="number" min={0} value={curStock}
+                      onChange={e => setVariantEdits(p => ({...p,[v.id]:e.target.value}))}
+                      style={{ width:70,padding:"7px 8px",border:`1.5px solid ${isDirty?"#f59e0b":"#d4c8e0"}`,borderRadius:8,fontSize:14,fontWeight:700,textAlign:"center",background:isDirty?"#fef9c3":"#fff" }}
+                    />
+                    <span style={{ fontSize:12,color:"#7a8ab0" }}>pcs</span>
+                  </div>
+                  <button onClick={()=>setConfirmDelVariant(v)} className="tap-btn"
+                    style={{ padding:"6px 10px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700 }}>✕ Hapus</button>
+                </div>
+              );
+            })}
+            {getItemVariants(editing).length === 0 && (
+              <div style={{ textAlign:"center",padding:"16px 0",color:"#b0b8cc",fontSize:13 }}>Belum ada desain — tambah di bawah</div>
+            )}
+          </div>
+          {/* Tambah desain baru */}
+          <div style={{ display:"flex",gap:8,marginBottom:Object.keys(variantEdits).length>0?12:0 }}>
+            <input placeholder="Nama desain baru..." value={variantName}
+              onChange={e=>setVariantName(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter") addVariant(editing); }}
+              style={{ flex:1,padding:"10px 13px",border:"1.5px solid #d4c8e0",borderRadius:10,fontSize:14 }}
+            />
+            <button onClick={()=>addVariant(editing)} className="tap-btn"
+              style={{ padding:"10px 18px",background:"#e4f3fd",color:"#2d4ba0",border:"1.5px solid #a1def9",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:700,whiteSpace:"nowrap" }}>+ Tambah</button>
+          </div>
+          {Object.keys(variantEdits).length > 0 && (
+            <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+              <button onClick={()=>saveVariantStocks(editing)} disabled={savingVariants} className="tap-btn"
+                style={{ padding:"10px 20px",background:savingVariants?"#ddd":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:savingVariants?"not-allowed":"pointer",fontSize:14 }}>
+                {savingVariants?"⏳ Menyimpan...":"💾 Simpan Perubahan Stok"}
+              </button>
+              <button onClick={()=>setVariantEdits({})} className="tap-btn"
+                style={{ padding:"10px 14px",background:"#fff",color:"#7a8ab0",border:"1.5px solid #d4c8e0",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:14 }}>
+                Batalkan
+              </button>
+              <span style={{ fontSize:12,color:"#92400e",fontWeight:600 }}>
+                Total: {getItemVariants(editing).reduce((s,v)=>s+(Number(variantEdits[v.id]??v.stock)||0),0)} pcs
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -1464,7 +1525,13 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                     </div>
                   </div>
                   <div style={{ display:"flex",gap:6 }}>
-                    <button onClick={()=>openEdit(item)} className="tap-btn" style={{ padding:"6px 12px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600 }}>✏️ Detail</button>
+                    {item.type === "product" && (
+                      <button onClick={()=>toggleExpand(item.id)} className="tap-btn"
+                        style={{ padding:"6px 10px",background:expandedItem===item.id?"#fef9c3":"#f8faff",color:expandedItem===item.id?"#92400e":"#7a8ab0",border:`1.5px solid ${expandedItem===item.id?"#f59e0b":"#d4c8e0"}`,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                        🎨 {getItemVariants(item.id).length > 0 ? getItemVariants(item.id).length : "+"}
+                      </button>
+                    )}
+                    <button onClick={()=>openEdit(item)} className="tap-btn" style={{ padding:"6px 10px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600 }}>✏️</button>
                     <button onClick={()=>setConfirmDelete(item)} className="tap-btn" style={{ padding:"6px 10px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,cursor:"pointer",fontSize:12 }}>🗑️</button>
                   </div>
                 </div>
@@ -1520,6 +1587,58 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
                 {isDirtyRow && (
                   <div style={{ marginTop:8,fontSize:11,color:"#92400e",fontWeight:600 }}>
                     ✏️ Ada perubahan — simpan via tombol di atas
+                  </div>
+                )}
+                {/* Mobile variant panel */}
+                {expandedItem === item.id && item.type === "product" && (
+                  <div style={{ marginTop:12,borderTop:"2px solid #f59e0b",paddingTop:12,background:"#fffbeb",borderRadius:8,padding:12 }}>
+                    <div style={{ fontWeight:700,fontSize:13,color:"#92400e",marginBottom:10 }}>
+                      🎨 Desain — <span style={{fontWeight:500}}>{item.name}</span>
+                    </div>
+                    <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:10 }}>
+                      {getItemVariants(item.id).map(v => {
+                        const editVal = variantEdits[v.id];
+                        const isDirty = editVal !== undefined;
+                        const curStock = isDirty ? editVal : v.stock;
+                        return (
+                          <div key={v.id} style={{ display:"flex",alignItems:"center",gap:10,background:"#fff",border:`2px solid ${isDirty?"#f59e0b":"#e8edf8"}`,borderRadius:10,padding:"8px 10px" }}>
+                            <div style={{ flex:1 }}>
+                              <div style={{ fontSize:13,fontWeight:700,color:"#1a2a5e" }}>{v.name}</div>
+                              <div style={{ fontSize:11,color:v.stock<=0?"#ef4444":"#7a8ab0" }}>{v.stock<=0?"❌ Habis":`Sisa ${v.stock} pcs`}</div>
+                            </div>
+                            <input type="number" min={0} value={curStock}
+                              onChange={e => setVariantEdits(p => ({...p,[v.id]:e.target.value}))}
+                              style={{ width:64,padding:"6px 8px",border:`1.5px solid ${isDirty?"#f59e0b":"#d4c8e0"}`,borderRadius:8,fontSize:14,fontWeight:700,textAlign:"center",background:isDirty?"#fef9c3":"#fff" }}
+                            />
+                            <span style={{ fontSize:11,color:"#7a8ab0" }}>pcs</span>
+                            <button onClick={()=>setConfirmDelVariant(v)} className="tap-btn"
+                              style={{ padding:"5px 8px",background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:7,cursor:"pointer",fontSize:12 }}>✕</button>
+                          </div>
+                        );
+                      })}
+                      {/* Tambah desain baru */}
+                      <div style={{ display:"flex",gap:8 }}>
+                        <input placeholder="Nama desain baru..." value={variantName}
+                          onChange={e=>setVariantName(e.target.value)}
+                          onKeyDown={e=>{ if(e.key==="Enter") addVariant(item.id); }}
+                          style={{ flex:1,padding:"9px 12px",border:"1.5px solid #d4c8e0",borderRadius:8,fontSize:13 }}
+                        />
+                        <button onClick={()=>addVariant(item.id)} className="tap-btn"
+                          style={{ padding:"9px 14px",background:"#e4f3fd",color:"#2d4ba0",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:700 }}>+ Add</button>
+                      </div>
+                    </div>
+                    {Object.keys(variantEdits).length > 0 && (
+                      <div style={{ display:"flex",gap:8 }}>
+                        <button onClick={()=>saveVariantStocks(item.id)} disabled={savingVariants} className="tap-btn"
+                          style={{ flex:1,padding:"10px 0",background:savingVariants?"#ddd":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:savingVariants?"not-allowed":"pointer",fontSize:13 }}>
+                          {savingVariants?"⏳ Menyimpan...":"💾 Simpan Stok Desain"}
+                        </button>
+                        <button onClick={()=>setVariantEdits({})} className="tap-btn"
+                          style={{ padding:"10px 14px",background:"#fff",color:"#7a8ab0",border:"1.5px solid #d4c8e0",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:13 }}>
+                          Batal
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1799,16 +1918,52 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
 
 // ─── STOCK MOVES ──────────────────────────────────────────────────────────────
 // ─── STOCK MOVE FORM ─────────────────────────────────────────────────────────
-function StockMoveForm({ items, onSave, onCancel, showCancel }) {
+function StockMoveForm({ items, variants, onSave, onCancel, showCancel }) {
   // State lokal — tidak bergantung parent, jadi focus tidak hilang saat ketik
   const [form, setForm] = useState({ item_id: "", direction: "in", qty: "", note: "" });
+  const [variantCounts, setVariantCounts] = useState({}); // { [variantId]: qty }
   const [saving, setSaving] = useState(false);
 
+  const selectedItem = items.find(i => i.id === form.item_id);
+  const itemVariants = selectedItem ? (variants || []).filter(v => v.item_id === form.item_id) : [];
+  const hasVariants = itemVariants.length > 0;
+  const isOut = form.direction === "out";
+
+  const totalVariantQty = Object.values(variantCounts).reduce((s, n) => s + (Number(n)||0), 0);
+
+  const incV = (id, maxStock) => {
+    setVariantCounts(c => {
+      const cur = Number(c[id])||0;
+      if (cur >= maxStock) return c;
+      return { ...c, [id]: cur + 1 };
+    });
+  };
+  const decV = (id) => {
+    setVariantCounts(c => {
+      const cur = Number(c[id])||0;
+      if (cur <= 0) return c;
+      return { ...c, [id]: cur - 1 };
+    });
+  };
+
+  // Reset variantCounts when item or direction changes
+  const handleItemChange = (val) => {
+    setForm(f => ({ ...f, item_id: val }));
+    setVariantCounts({});
+  };
+  const handleDirectionChange = (val) => {
+    setForm(f => ({ ...f, direction: val }));
+    setVariantCounts({});
+  };
+
+  const canSave = form.item_id && form.qty && (!isOut || !hasVariants || totalVariantQty === Number(form.qty));
+
   const save = async () => {
-    if (!form.item_id || !form.qty) return;
+    if (!canSave) return;
     setSaving(true);
-    await onSave(form);
+    await onSave({ ...form, variantCounts: isOut && hasVariants ? variantCounts : null });
     setForm({ item_id: "", direction: "in", qty: "", note: "" });
+    setVariantCounts({});
     setSaving(false);
   };
 
@@ -1816,7 +1971,7 @@ function StockMoveForm({ items, onSave, onCancel, showCancel }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", gap: 8 }}>
         {[["in","📥 Masuk"],["out","📤 Keluar"]].map(([v,l]) => (
-          <button key={v} onClick={() => setForm(f => ({ ...f, direction: v }))} className="tap-btn"
+          <button key={v} onClick={() => handleDirectionChange(v)} className="tap-btn"
             style={{ flex:1, padding:"11px 0", border:`2px solid ${form.direction===v?(v==="in"?"#10b981":"#ef4444"):"#d4c8e0"}`, borderRadius:10,
               background:form.direction===v?(v==="in"?"#d1fae5":"#fee2e2"):"#fff",
               color:form.direction===v?(v==="in"?"#10b981":"#ef4444"):"#7a8ab0",
@@ -1825,7 +1980,7 @@ function StockMoveForm({ items, onSave, onCancel, showCancel }) {
       </div>
       <div>
         <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Item *</label>
-        <select value={form.item_id} onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))}
+        <select value={form.item_id} onChange={e => handleItemChange(e.target.value)}
           style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:14 }}>
           <option value="">— Pilih item —</option>
           {items.filter(i => i.type !== "workshop").map(i => (
@@ -1839,6 +1994,45 @@ function StockMoveForm({ items, onSave, onCancel, showCancel }) {
           onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
           style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:15 }} />
       </div>
+
+      {/* Variant picker — only for OUT with variants */}
+      {isOut && hasVariants && Number(form.qty) > 0 && (
+        <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:12, padding:"12px 14px" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:8 }}>
+            🎨 Pilih desain yang berkurang
+            {totalVariantQty === Number(form.qty)
+              ? <span style={{ marginLeft:8, background:"#d1fae5", color:"#10b981", borderRadius:6, padding:"2px 8px", fontWeight:700 }}>✓ Sesuai</span>
+              : <span style={{ marginLeft:8, background:"#fee2e2", color:"#ef4444", borderRadius:6, padding:"2px 8px", fontWeight:700 }}>{Number(form.qty) - totalVariantQty} lagi</span>
+            }
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+            {itemVariants.map(v => {
+              const cnt = Number(variantCounts[v.id])||0;
+              return (
+                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:9, border:`2px solid ${cnt>0?"#ee4181":"#e8edf8"}`, background:cnt>0?"#fde8f0":"#fff" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:cnt>0?700:500, color:"#1a2a5e" }}>{v.name}</div>
+                    <div style={{ fontSize:11, color:v.stock<=0?"#ef4444":"#7a8ab0" }}>{v.stock<=0?"❌ Habis":`Sisa ${v.stock} pcs`}</div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <button onClick={()=>decV(v.id)} disabled={!cnt} className="tap-btn"
+                      style={{ width:30, height:30, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#fde8f0", cursor:cnt?"pointer":"not-allowed", fontSize:16, color:"#ee4181", fontWeight:700, opacity:cnt?1:0.4 }}>−</button>
+                    <span style={{ fontSize:14, fontWeight:700, minWidth:22, textAlign:"center", color:cnt>0?"#ee4181":"#c8d2e0" }}>{cnt}</span>
+                    <button onClick={()=>incV(v.id, v.stock)} disabled={v.stock<=0 || cnt>=v.stock || totalVariantQty>=Number(form.qty)} className="tap-btn"
+                      style={{ width:30, height:30, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#e4f3fd", cursor:(v.stock>0&&cnt<v.stock&&totalVariantQty<Number(form.qty))?"pointer":"not-allowed", fontSize:16, color:"#2d4ba0", fontWeight:700, opacity:(v.stock>0&&cnt<v.stock&&totalVariantQty<Number(form.qty))?1:0.4 }}>+</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {totalVariantQty !== Number(form.qty) && (
+            <div style={{ fontSize:12, color:"#ef4444", fontWeight:600, marginTop:8 }}>
+              ⚠️ Total desain ({totalVariantQty}) harus sama dengan jumlah ({form.qty}) sebelum bisa disimpan
+            </div>
+          )}
+        </div>
+      )}
+
       <div>
         <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Keterangan</label>
         <input placeholder="Contoh: Restock dari supplier..." value={form.note}
@@ -1846,8 +2040,8 @@ function StockMoveForm({ items, onSave, onCancel, showCancel }) {
           style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:14 }} />
       </div>
       <div style={{ display:"flex", gap:8 }}>
-        <button onClick={save} disabled={saving || !form.item_id || !form.qty} className="tap-btn"
-          style={{ flex:1, padding:"13px 0", background:(saving||!form.item_id||!form.qty)?"#ddd":"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:12, fontWeight:700, cursor:(saving||!form.item_id||!form.qty)?"not-allowed":"pointer", fontSize:15 }}>
+        <button onClick={save} disabled={saving || !canSave} className="tap-btn"
+          style={{ flex:1, padding:"13px 0", background:(saving||!canSave)?"#ddd":"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:12, fontWeight:700, cursor:(saving||!canSave)?"not-allowed":"pointer", fontSize:15 }}>
           {saving ? "⏳ Menyimpan..." : "💾 Simpan"}
         </button>
         {showCancel && (
@@ -1861,7 +2055,7 @@ function StockMoveForm({ items, onSave, onCancel, showCancel }) {
   );
 }
 
-function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
+function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) {
   const [showForm, setShowForm]       = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedMoves, setSelectedMoves] = useState(new Set());
@@ -1887,9 +2081,27 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
     try {
       const item = items.find(i => i.id === form.item_id);
       const qty = Number(form.qty);
-      const newStock = form.direction === "in" ? (item.stock || 0) + qty : Math.max(0, (item.stock || 0) - qty);
-      await api("kr_stock_moves", { method: "POST", body: JSON.stringify({ ...form, qty }), prefer: "return=minimal" });
-      await api(`kr_items?id=eq.${form.item_id}`, { method: "PATCH", body: JSON.stringify({ stock: newStock }), prefer: "return=minimal" });
+      const { variantCounts, ...formData } = form;
+      await api("kr_stock_moves", { method: "POST", body: JSON.stringify({ ...formData, qty }), prefer: "return=minimal" });
+
+      if (form.direction === "out" && variantCounts && Object.keys(variantCounts).length > 0) {
+        // Deduct each variant individually
+        const allVariants = (variants || []).filter(v => v.item_id === form.item_id);
+        for (const [vid, vqty] of Object.entries(variantCounts)) {
+          const vqtyNum = Number(vqty) || 0;
+          if (vqtyNum <= 0) continue;
+          const vObj = allVariants.find(v => v.id === vid);
+          if (vObj) {
+            await api(`kr_item_variants?id=eq.${vid}`, { method: "PATCH", body: JSON.stringify({ stock: Math.max(0, (vObj.stock||0) - vqtyNum) }), prefer: "return=minimal" });
+          }
+        }
+        // Update item.stock = sum of remaining variant stocks
+        const updatedTotal = allVariants.reduce((s, v) => s + Math.max(0, (v.stock||0) - (Number(variantCounts[v.id])||0)), 0);
+        await api(`kr_items?id=eq.${form.item_id}`, { method: "PATCH", body: JSON.stringify({ stock: updatedTotal }), prefer: "return=minimal" });
+      } else {
+        const newStock = form.direction === "in" ? (item.stock || 0) + qty : Math.max(0, (item.stock || 0) - qty);
+        await api(`kr_items?id=eq.${form.item_id}`, { method: "PATCH", body: JSON.stringify({ stock: newStock }), prefer: "return=minimal" });
+      }
       setShowForm(false); onRefresh();
       showToast(`${form.direction === "in" ? "📥 Stok masuk" : "📤 Stok keluar"} dicatat!`);
     } catch (e) { showToast("Error: " + e.message, "error"); }
@@ -1922,7 +2134,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
           ) : (
             <div style={{ ...CARD, padding:18, marginBottom:16 }}>
               <div style={{ fontWeight:700, fontSize:15, marginBottom:14, color:"#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
-              <StockMoveForm items={items} onSave={handleSave} onCancel={() => setShowForm(false)} showCancel />
+              <StockMoveForm items={items} variants={variants} onSave={handleSave} onCancel={() => setShowForm(false)} showCancel />
             </div>
           )}
           <div style={{ fontWeight:700, fontSize:15, marginBottom:10, color:"#1a2a5e" }}>📋 Riwayat Mutasi</div>
@@ -1933,7 +2145,7 @@ function StockMoves({ items, moves, onRefresh, showToast, isMobile }) {
         <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:24 }}>
           <div style={{ ...CARD, padding:22, height:"fit-content" }}>
             <div style={{ fontWeight:800, fontSize:17, marginBottom:18, color:"#1a2a5e" }}>↕️ Catat Mutasi Stok</div>
-            <StockMoveForm items={items} onSave={handleSave} onCancel={() => {}} />
+            <StockMoveForm items={items} variants={variants} onSave={handleSave} onCancel={() => {}} />
           </div>
           <div>
             <div style={{ fontWeight:800, fontSize:17, marginBottom:14, color:"#1a2a5e" }}>📋 Riwayat</div>
