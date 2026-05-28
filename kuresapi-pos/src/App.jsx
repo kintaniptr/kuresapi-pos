@@ -2110,6 +2110,44 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
+  const handleEditVariants = async (changes) => {
+    // changes = [{ id: variantId, newStock: number }, ...]
+    try {
+      for (const { id, newStock } of changes) {
+        await api(`kr_item_variants?id=eq.${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ stock: Math.max(0, newStock) }),
+          prefer: "return=minimal"
+        });
+      }
+      // Refresh item stock = sum of variant stocks
+      // Group by item_id
+      const itemsToUpdate = {};
+      for (const { id, newStock } of changes) {
+        const v = variants.find(x => x.id === id);
+        if (v) {
+          if (!itemsToUpdate[v.item_id]) itemsToUpdate[v.item_id] = [];
+          itemsToUpdate[v.item_id].push({ id, newStock });
+        }
+      }
+      for (const itemId of Object.keys(itemsToUpdate)) {
+        // Get all variants for this item to sum
+        const allV = variants.filter(x => x.item_id === itemId);
+        const total = allV.reduce((s, x) => {
+          const changed = itemsToUpdate[itemId]?.find(c => c.id === x.id);
+          return s + (changed ? changed.newStock : x.stock);
+        }, 0);
+        await api(`kr_items?id=eq.${itemId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ stock: total }),
+          prefer: "return=minimal"
+        });
+      }
+      onRefresh();
+      showToast(`✅ Stok ${changes.length} desain diperbarui!`);
+    } catch (e) { showToast("Error: " + e.message, "error"); }
+  };
+
   const handleEdit = async (move, newQty, newNote) => {
     try {
       const item = items.find(i => i.id === move.item_id);
@@ -2166,7 +2204,7 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
             </div>
           )}
           <div style={{ fontWeight:700, fontSize:15, marginBottom:10, color:"#1a2a5e" }}>📋 Riwayat Mutasi</div>
-          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} onEdit={handleEdit} selected={selectedMoves} setSelected={setSelectedMoves} />
+          <MovesList moves={moves} itemMap={itemMap} isMobile onDelete={setConfirmDelete} onEdit={handleEdit} onEditVariants={handleEditVariants} selected={selectedMoves} setSelected={setSelectedMoves} />
         </>
       ) : (
         /* ── Desktop: side-by-side, form always visible ── */
@@ -2177,7 +2215,7 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
           </div>
           <div>
             <div style={{ fontWeight:800, fontSize:17, marginBottom:14, color:"#1a2a5e" }}>📋 Riwayat</div>
-            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} onEdit={handleEdit} selected={selectedMoves} setSelected={setSelectedMoves} />
+            <MovesList moves={moves} itemMap={itemMap} onDelete={setConfirmDelete} onEdit={handleEdit} onEditVariants={handleEditVariants} selected={selectedMoves} setSelected={setSelectedMoves} />
           </div>
         </div>
       )}
@@ -2185,45 +2223,116 @@ function StockMoves({ items, variants, moves, onRefresh, showToast, isMobile }) 
   );
 }
 
-function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSelected }) {
+// ─── VARIANT EDIT PANEL (inline in Riwayat) ──────────────────────────────────
+function VariantEditPanel({ move, item, onEditVariants, onClose }) {
+  const [variants, setVariants] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [adjusts, setAdjusts]   = useState({}); // { [variantId]: newStock }
+  const [saving, setSaving]     = useState(false);
+
+  useEffect(() => {
+    if (!item?.id) return;
+    setLoading(true);
+    api(`kr_item_variants?item_id=eq.${item.id}&order=name.asc`)
+      .then(v => { setVariants(v); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [item?.id]);
+
+  const set = (id, val) => setAdjusts(a => ({ ...a, [id]: val }));
+  const inc = (id, cur) => set(id, Math.max(0, (Number(adjusts[id] ?? cur) || 0) + 1));
+  const dec = (id, cur) => set(id, Math.max(0, (Number(adjusts[id] ?? cur) || 0) - 1));
+
+  const dirty = Object.keys(adjusts).filter(id => {
+    const v = variants.find(x => x.id === id);
+    return v && Number(adjusts[id]) !== v.stock;
+  });
+
+  const save = async () => {
+    if (!dirty.length) { onClose(); return; }
+    setSaving(true);
+    await onEditVariants(dirty.map(id => ({ id, newStock: Number(adjusts[id]) })));
+    setSaving(false);
+    onClose();
+  };
+
+  const colDelta = (id, orig) => {
+    const cur = Number(adjusts[id] ?? orig);
+    const d = cur - orig;
+    if (d === 0) return null;
+    return <span style={{ fontSize:11, fontWeight:700, color:d>0?"#10b981":"#ef4444", marginLeft:4 }}>{d>0?"+":""}{d}</span>;
+  };
+
+  return (
+    <div style={{ borderLeft:"3px solid #f59e0b", margin:"0 14px 14px 0", padding:"14px 16px", borderRadius:"0 0 10px 10px" }}>
+      <div style={{ fontWeight:700, fontSize:13, color:"#92400e", marginBottom:12 }}>
+        🎨 Koreksi stok desain — <b>{item?.name}</b>
+        <span style={{ fontSize:11, fontWeight:400, color:"#7a8ab0", marginLeft:8 }}>Ubah langsung stok masing-masing desain</span>
+      </div>
+
+      {loading ? (
+        <div style={{ color:"#7a8ab0", fontSize:13 }}>⏳ Memuat desain...</div>
+      ) : variants.length === 0 ? (
+        <div style={{ color:"#7a8ab0", fontSize:13 }}>Tidak ada desain terdaftar untuk item ini.</div>
+      ) : (
+        <>
+          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:12 }}>
+            {variants.map(v => {
+              const cur = Number(adjusts[v.id] ?? v.stock);
+              const changed = adjusts[v.id] !== undefined && Number(adjusts[v.id]) !== v.stock;
+              return (
+                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:9, border:`2px solid ${changed?"#ee4181":"#e8edf8"}`, background:changed?"#fff0f6":"#fff" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:changed?700:500, color:"#1a2a5e" }}>
+                      {v.name}
+                      {colDelta(v.id, v.stock)}
+                    </div>
+                    <div style={{ fontSize:11, color:"#7a8ab0" }}>Stok saat ini: {v.stock} pcs</div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <button onClick={() => dec(v.id, v.stock)} className="tap-btn"
+                      style={{ width:32, height:32, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#fde8f0", cursor:"pointer", fontSize:17, color:"#ee4181", fontWeight:700 }}>−</button>
+                    <input type="number" min={0} value={cur}
+                      onChange={e => set(v.id, e.target.value)}
+                      style={{ width:64, padding:"6px 0", border:`2px solid ${changed?"#ee4181":"#d4c8e0"}`, borderRadius:8, fontSize:15, fontWeight:700, textAlign:"center", background:changed?"#fff0f6":"#fff" }} />
+                    <button onClick={() => inc(v.id, v.stock)} className="tap-btn"
+                      style={{ width:32, height:32, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#e4f3fd", cursor:"pointer", fontSize:17, color:"#2d4ba0", fontWeight:700 }}>+</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {dirty.length > 0 && (
+            <div style={{ background:"#fff8e6", border:"1px solid #f59e0b", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#92400e", marginBottom:10 }}>
+              ✏️ {dirty.length} desain akan diperbarui: {dirty.map(id => {
+                const v = variants.find(x => x.id === id);
+                const d = Number(adjusts[id]) - v.stock;
+                return `${v.name} (${d>0?"+":""}${d})`;
+              }).join(", ")}
+            </div>
+          )}
+
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={save} disabled={saving} className="tap-btn"
+              style={{ padding:"9px 20px", background:saving?"#ddd":"linear-gradient(135deg,#ee4181,#2d4ba0)", color:"#fff", border:"none", borderRadius:10, fontWeight:700, cursor:saving?"not-allowed":"pointer", fontSize:14 }}>
+              {saving?"⏳ Menyimpan...":dirty.length?`💾 Simpan (${dirty.length} desain)`:"✓ Tutup"}
+            </button>
+            <button onClick={onClose} className="tap-btn"
+              style={{ padding:"9px 14px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:10, fontWeight:600, cursor:"pointer", fontSize:14 }}>
+              Batal
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, onEditVariants, selected, setSelected }) {
   const toggle = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAll = () => setSelected(s => s.size === moves.length ? new Set() : new Set(moves.map(m => m.id)));
   const [editingId, setEditingId] = useState(null);
-  const [editQty, setEditQty]     = useState("");
-  const [editNote, setEditNote]   = useState("");
-  const [saving, setSaving]       = useState(false);
-
-  const startEdit = (m) => {
-    setEditingId(m.id);
-    setEditQty(String(m.qty));
-    setEditNote(m.note || "");
-  };
-  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditNote(""); };
-
-  const saveEdit = async (m) => {
-    const newQty = Number(editQty);
-    if (!newQty || newQty < 0) return;
-    setSaving(true);
-    await onEdit(m, newQty, editNote);
-    cancelEdit();
-    setSaving(false);
-  };
-
-  const QtyDisplay = ({ m }) => {
-    const item = itemMap[m.item_id];
-    const bq = item?.bundle_qty || 1;
-    const pcs = m.qty;
-    if (bq > 1) {
-      const bundles = pcs / bq;
-      return (
-        <div>
-          <div style={{ fontSize:15, fontWeight:800, color: m.direction==="in"?"#10b981":"#ef4444" }}>{pcs} pcs</div>
-          <div style={{ fontSize:11, color:"#7a8ab0", marginTop:1 }}>{Number.isInteger(bundles) ? `${bundles} bundle` : `~${bundles.toFixed(1)} bundle`} × {bq}pcs</div>
-        </div>
-      );
-    }
-    return <span style={{ fontSize:15, fontWeight:800 }}>{pcs}</span>;
-  };
+  const cancelEdit = () => setEditingId(null);
 
   if (moves.length === 0) return (
     <div style={{ ...CARD, padding: 40, textAlign: "center", color: "#7a8ab0" }}>
@@ -2237,71 +2346,28 @@ function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSe
         const isSel = selected.has(m.id);
         const isEditing = editingId === m.id;
         const item = itemMap[m.item_id];
-        const bq = item?.bundle_qty || 1;
         return (
           <div key={m.id} style={{ ...CARD, padding: 12, background: isEditing?"#fffbeb":isSel?"#fde8f0":"#fff", border:`1.5px solid ${isEditing?"#f59e0b":isSel?"#f5a8c4":"#d4c8e0"}` }}>
-            {!isEditing ? (
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:17, height:17, accentColor:"#ee4181", cursor:"pointer", flexShrink:0 }} />
-                <span style={{ fontSize: 22 }}>{m.direction === "in" ? "📥" : "📤"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item?.name || "—"}</div>
-                  <div style={{ fontSize: 11, color: "#7a8ab0" }}>{formatDate(m.created_at)} · {m.note || "—"}</div>
-                </div>
-                <div style={{ textAlign:"right", flexShrink:0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444" }}>
-                    {m.direction === "in" ? "+" : "−"}{m.qty}
-                  </div>
-                  {bq > 1 && <div style={{ fontSize:10, color:"#7a8ab0" }}>{Math.round(m.qty/bq)} bundle</div>}
-                </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
-                  <button onClick={() => startEdit(m)} className="tap-btn" style={{ padding:"5px 8px", background:"#e4f3fd", color:"#2d4ba0", border:"none", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>✏️</button>
-                  <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding:"5px 8px", background:"#fee2e2", color:"#ef4444", border:"none", borderRadius:7, cursor:"pointer", fontSize:12 }}>🗑️</button>
-                </div>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:17, height:17, accentColor:"#ee4181", cursor:"pointer", flexShrink:0 }} />
+              <span style={{ fontSize: 22 }}>{m.direction === "in" ? "📥" : "📤"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item?.name || "—"}</div>
+                <div style={{ fontSize: 11, color: "#7a8ab0" }}>{formatDate(m.created_at)} · {m.note || "—"}</div>
               </div>
-            ) : (
-              <div>
-                <div style={{ fontWeight:700, fontSize:13, color:"#92400e", marginBottom:10 }}>
-                  ✏️ Edit — {item?.name || "—"}
-                  {bq > 1 && <span style={{ fontSize:11, fontWeight:500, color:"#7a8ab0", marginLeft:6 }}>bundle_qty={bq} pcs</span>}
-                </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  <div>
-                    <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600 }}>Qty (pcs)</label>
-                    {bq > 1 && <span style={{ fontSize:11, color:"#7a8ab0", marginLeft:6 }}>→ {Number(editQty)>0?`${Math.round(Number(editQty)/bq)} bundle`:""}</span>}
-                    <input type="number" min={0} value={editQty} onChange={e=>setEditQty(e.target.value)}
-                      style={{ width:"100%", padding:"9px 12px", border:"2px solid #f59e0b", borderRadius:8, fontSize:15, fontWeight:700, marginTop:4 }} />
-                    {bq > 1 && (
-                      <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap" }}>
-                        {[1,2,3,5,10].map(n => (
-                          <button key={n} onClick={()=>setEditQty(String(n*bq))} className="tap-btn"
-                            style={{ padding:"4px 10px", background:Number(editQty)===n*bq?"#fef9c3":"#f8faff", border:`1.5px solid ${Number(editQty)===n*bq?"#f59e0b":"#d4c8e0"}`, borderRadius:6, fontSize:12, fontWeight:600, cursor:"pointer", color:"#92400e" }}>
-                            {n}x = {n*bq}pcs
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600 }}>Keterangan</label>
-                    <input value={editNote} onChange={e=>setEditNote(e.target.value)}
-                      style={{ width:"100%", padding:"9px 12px", border:"1.5px solid #d4c8e0", borderRadius:8, fontSize:13, marginTop:4 }} />
-                  </div>
-                  <div style={{ background:"#fff8e6", border:"1px solid #f59e0b", borderRadius:8, padding:"8px 10px", fontSize:12, color:"#92400e" }}>
-                    ⚠️ Selisih qty akan diterapkan ke stok item. Arah: <b>{m.direction === "in" ? "Masuk (+)" : "Keluar (−)"}</b>
-                  </div>
-                  <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=>saveEdit(m)} disabled={saving||!editQty} className="tap-btn"
-                      style={{ flex:1, padding:"10px 0", background:saving?"#ddd":"linear-gradient(135deg,#10b981,#059669)", color:"#fff", border:"none", borderRadius:10, fontWeight:700, cursor:saving?"not-allowed":"pointer", fontSize:14 }}>
-                      {saving?"⏳ Menyimpan...":"💾 Simpan"}
-                    </button>
-                    <button onClick={cancelEdit} className="tap-btn"
-                      style={{ padding:"10px 16px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:10, fontWeight:600, cursor:"pointer", fontSize:14 }}>
-                      Batal
-                    </button>
-                  </div>
-                </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: m.direction === "in" ? "#10b981" : "#ef4444", flexShrink: 0 }}>
+                {m.direction === "in" ? "+" : "−"}{m.qty}
               </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
+                {item?.type === "product" && (
+                  <button onClick={() => setEditingId(isEditing ? null : m.id)} className="tap-btn"
+                    style={{ padding:"5px 8px", background:isEditing?"#fef9c3":"#e4f3fd", color:isEditing?"#92400e":"#2d4ba0", border:`1.5px solid ${isEditing?"#f59e0b":"transparent"}`, borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>🎨</button>
+                )}
+                <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding:"5px 8px", background:"#fee2e2", color:"#ef4444", border:"none", borderRadius:7, cursor:"pointer", fontSize:12 }}>🗑️</button>
+              </div>
+            </div>
+            {isEditing && (
+              <VariantEditPanel move={m} item={item} onEditVariants={onEditVariants} onClose={cancelEdit} />
             )}
           </div>
         );
@@ -2309,7 +2375,7 @@ function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSe
     </div>
   );
 
-  // Desktop table
+  // Desktop
   return (
     <div style={{ ...CARD, overflow: "visible" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2319,7 +2385,7 @@ function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSe
               <input type="checkbox" checked={moves.length > 0 && selected.size === moves.length} onChange={toggleAll}
                 style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
             </th>
-            {["Waktu","Item","Arah","Qty (pcs)","Keterangan","Aksi"].map(h => (
+            {["Waktu","Item","Arah","Qty","Keterangan",""].map(h => (
               <th key={h} style={{ padding: "11px 8px", textAlign: "left", fontSize: 12, color: "#1a2a5e", fontWeight: 700, borderBottom: "2px solid #d4c8e0" }}>{h}</th>
             ))}
           </tr>
@@ -2329,83 +2395,40 @@ function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSe
             const isSel = selected.has(m.id);
             const isEditing = editingId === m.id;
             const item = itemMap[m.item_id];
-            const bq = item?.bundle_qty || 1;
             return (
               <React.Fragment key={m.id}>
-              <tr style={{ borderBottom: isEditing?"none":"1px solid #d4c8e0", background: isEditing?"#fffbeb":isSel?"#fde8f0":"transparent" }}>
-                <td style={{ padding:"8px 14px" }}>
-                  <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
-                </td>
-                <td style={{ padding: "10px 8px", fontSize: 12, color: "#7a8ab0", whiteSpace:"nowrap" }}>{formatDate(m.created_at)}</td>
-                <td style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600 }}>{item?.name || "—"}</td>
-                <td style={{ padding: "10px 8px" }}>
-                  <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: m.direction === "in" ? "#d1fae5" : "#fee2e2", color: m.direction === "in" ? "#10b981" : "#ef4444" }}>{m.direction === "in" ? "📥 Masuk" : "📤 Keluar"}</span>
-                </td>
-                <td style={{ padding: "10px 8px" }}>
-                  <QtyDisplay m={m} />
-                </td>
-                <td style={{ padding: "10px 8px", fontSize: 13, color: "#7a8ab0" }}>{m.note || "—"}</td>
-                <td style={{ padding: "8px 8px" }}>
-                  <div style={{ display:"flex", gap:5 }}>
-                    <button onClick={() => isEditing ? cancelEdit() : startEdit(m)} className="tap-btn"
-                      style={{ padding:"5px 9px", background:isEditing?"#fef9c3":"#e4f3fd", color:isEditing?"#92400e":"#2d4ba0", border:`1.5px solid ${isEditing?"#f59e0b":"transparent"}`, borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                      {isEditing?"✕ Batal":"✏️"}
-                    </button>
-                    <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 9px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
-                  </div>
-                </td>
-              </tr>
-              {isEditing && (
-                <tr style={{ borderBottom: "2px solid #f59e0b" }}>
-                  <td colSpan={7} style={{ padding:"0 14px 14px 54px", background:"#fffbeb" }}>
-                    <div style={{ borderLeft:"3px solid #f59e0b", paddingLeft:16, paddingTop:12 }}>
-                      <div style={{ fontWeight:700, fontSize:13, color:"#92400e", marginBottom:10 }}>
-                        ✏️ Edit mutasi — <b>{item?.name}</b>
-                        {bq > 1 && <span style={{ fontWeight:500, color:"#7a8ab0", marginLeft:8 }}>bundle_qty = {bq} pcs/bundle</span>}
-                      </div>
-                      <div style={{ display:"flex", gap:16, alignItems:"flex-start", flexWrap:"wrap" }}>
-                        <div>
-                          <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600, display:"block", marginBottom:4 }}>Qty (pcs)</label>
-                          <input type="number" min={0} value={editQty} onChange={e=>setEditQty(e.target.value)}
-                            style={{ width:100, padding:"8px 10px", border:"2px solid #f59e0b", borderRadius:8, fontSize:16, fontWeight:700, textAlign:"center", background:"#fef9c3" }} />
-                          {bq > 1 && (
-                            <div style={{ marginTop:6 }}>
-                              <div style={{ fontSize:11, color:"#92400e", marginBottom:6, fontWeight:600 }}>Preset bundle:</div>
-                              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                                {[1,2,3,4,5,6,8,10].map(n => (
-                                  <button key={n} onClick={()=>setEditQty(String(n*bq))} className="tap-btn"
-                                    style={{ padding:"4px 9px", background:Number(editQty)===n*bq?"#fef9c3":"#fff", border:`1.5px solid ${Number(editQty)===n*bq?"#f59e0b":"#d4c8e0"}`, borderRadius:6, fontSize:12, fontWeight:Number(editQty)===n*bq?700:500, cursor:"pointer", color:"#92400e" }}>
-                                    {n}× = {n*bq} pcs
-                                  </button>
-                                ))}
-                              </div>
-                              {Number(editQty) > 0 && <div style={{ fontSize:12, color:"#10b981", fontWeight:600, marginTop:6 }}>= {Math.round(Number(editQty)/bq)} bundle</div>}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ flex:1, minWidth:180 }}>
-                          <label style={{ fontSize:12, color:"#7a8ab0", fontWeight:600, display:"block", marginBottom:4 }}>Keterangan</label>
-                          <input value={editNote} onChange={e=>setEditNote(e.target.value)} placeholder="Keterangan (opsional)"
-                            style={{ width:"100%", padding:"9px 12px", border:"1.5px solid #d4c8e0", borderRadius:8, fontSize:13 }} />
-                        </div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:12, flexWrap:"wrap" }}>
-                        <div style={{ background:"#fff8e6", border:"1px solid #f59e0b", borderRadius:8, padding:"7px 12px", fontSize:12, color:"#92400e" }}>
-                          ⚠️ Selisih {Number(editQty) - m.qty > 0 ? "+" : ""}{Number(editQty) - m.qty} pcs akan {m.direction==="in"?"ditambah ke":"dikurangi dari"} stok
-                        </div>
-                        <button onClick={()=>saveEdit(m)} disabled={saving||!editQty||Number(editQty)<0} className="tap-btn"
-                          style={{ padding:"9px 20px", background:saving?"#ddd":"linear-gradient(135deg,#10b981,#059669)", color:"#fff", border:"none", borderRadius:10, fontWeight:700, cursor:(saving||!editQty||Number(editQty)<0)?"not-allowed":"pointer", fontSize:14 }}>
-                          {saving?"⏳ Menyimpan...":"💾 Simpan Perubahan"}
+                <tr style={{ borderBottom: isEditing?"none":"1px solid #d4c8e0", background: isEditing?"#fffbeb":isSel?"#fde8f0":"transparent" }}>
+                  <td style={{ padding:"8px 14px" }}>
+                    <input type="checkbox" checked={isSel} onChange={() => toggle(m.id)} style={{ width:16, height:16, accentColor:"#ee4181", cursor:"pointer" }} />
+                  </td>
+                  <td style={{ padding: "10px 8px", fontSize: 12, color: "#7a8ab0", whiteSpace:"nowrap" }}>{formatDate(m.created_at)}</td>
+                  <td style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600 }}>{item?.name || "—"}</td>
+                  <td style={{ padding: "10px 8px" }}>
+                    <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 700, background: m.direction === "in" ? "#d1fae5" : "#fee2e2", color: m.direction === "in" ? "#10b981" : "#ef4444" }}>
+                      {m.direction === "in" ? "📥 Masuk" : "📤 Keluar"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 8px", fontSize: 15, fontWeight: 800 }}>{m.qty}</td>
+                  <td style={{ padding: "10px 8px", fontSize: 13, color: "#7a8ab0" }}>{m.note || "—"}</td>
+                  <td style={{ padding: "8px 8px" }}>
+                    <div style={{ display:"flex", gap:5 }}>
+                      {item?.type === "product" && (
+                        <button onClick={() => setEditingId(isEditing ? null : m.id)} className="tap-btn"
+                          style={{ padding:"5px 9px", background:isEditing?"#fef9c3":"#e4f3fd", color:isEditing?"#92400e":"#2d4ba0", border:`1.5px solid ${isEditing?"#f59e0b":"transparent"}`, borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                          🎨 Desain
                         </button>
-                        <button onClick={cancelEdit} className="tap-btn"
-                          style={{ padding:"9px 14px", background:"#fff", color:"#7a8ab0", border:"1.5px solid #d4c8e0", borderRadius:10, fontWeight:600, cursor:"pointer", fontSize:14 }}>
-                          Batal
-                        </button>
-                      </div>
+                      )}
+                      <button onClick={() => onDelete(m)} className="tap-btn" style={{ padding: "5px 9px", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑️</button>
                     </div>
                   </td>
                 </tr>
-              )}
+                {isEditing && (
+                  <tr style={{ borderBottom: "2px solid #f59e0b" }}>
+                    <td colSpan={7} style={{ padding:"0 0 0 54px", background:"#fffbeb" }}>
+                      <VariantEditPanel move={m} item={item} onEditVariants={onEditVariants} onClose={cancelEdit} />
+                    </td>
+                  </tr>
+                )}
               </React.Fragment>
             );
           })}
@@ -2414,6 +2437,7 @@ function MovesList({ moves, itemMap, isMobile, onDelete, onEdit, selected, setSe
     </div>
   );
 }
+
 
 // ─── SALES ────────────────────────────────────────────────────────────────────
 function Sales({ orders, items, onRefresh, showToast, isMobile }) {
