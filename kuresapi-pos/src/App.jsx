@@ -1298,6 +1298,7 @@ function Inventory({ items, variants, onRefresh, showToast, isMobile }) {
   // ── Detail form ──────────────────────────────────────────────────────────────
   if (showForm) return (
     <div style={{ maxWidth: 540 }}>
+      {confirmDelVariant && <ConfirmModal title="Hapus Desain?" message={`Hapus desain "${confirmDelVariant.name}"?`} onConfirm={()=>deleteVariant(confirmDelVariant)} onCancel={()=>setConfirmDelVariant(null)} />}
       <div style={{ fontWeight: 800, fontSize: isMobile?17:20, marginBottom: 18, color: "#1a2a5e" }}>{editing ? "✏️ Edit Item" : "✨ Tambah Item Baru"}</div>
       <div style={{ ...CARD, padding: isMobile?18:28, display: "flex", flexDirection: "column", gap: 14 }}>
         <div>
@@ -1956,12 +1957,15 @@ function StockMoveForm({ items, variants, onSave, onCancel, showCancel }) {
     setVariantCounts({});
   };
 
-  const canSave = form.item_id && form.qty && (!isOut || !hasVariants || totalVariantQty === Number(form.qty));
+  // For OUT with variants: valid if at least 1 variant selected; qty is auto-computed from variant totals
+  const effectiveQty = isOut && hasVariants ? totalVariantQty : Number(form.qty);
+  const canSave = form.item_id && effectiveQty > 0 && (!isOut || !hasVariants || totalVariantQty > 0);
 
   const save = async () => {
     if (!canSave) return;
     setSaving(true);
-    await onSave({ ...form, variantCounts: isOut && hasVariants ? variantCounts : null });
+    const finalQty = isOut && hasVariants ? String(totalVariantQty) : form.qty;
+    await onSave({ ...form, qty: finalQty, variantCounts: isOut && hasVariants ? variantCounts : null });
     setForm({ item_id: "", direction: "in", qty: "", note: "" });
     setVariantCounts({});
     setSaving(false);
@@ -1988,48 +1992,47 @@ function StockMoveForm({ items, variants, onSave, onCancel, showCancel }) {
           ))}
         </select>
       </div>
-      <div>
-        <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Jumlah *</label>
-        <input type="number" min={1} placeholder="0" value={form.qty}
-          onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
-          style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:15 }} />
-      </div>
-
-      {/* Variant picker — only for OUT with variants */}
-      {isOut && hasVariants && Number(form.qty) > 0 && (
-        <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:12, padding:"12px 14px" }}>
-          <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:8 }}>
-            🎨 Pilih desain yang berkurang
-            {totalVariantQty === Number(form.qty)
-              ? <span style={{ marginLeft:8, background:"#d1fae5", color:"#10b981", borderRadius:6, padding:"2px 8px", fontWeight:700 }}>✓ Sesuai</span>
-              : <span style={{ marginLeft:8, background:"#fee2e2", color:"#ef4444", borderRadius:6, padding:"2px 8px", fontWeight:700 }}>{Number(form.qty) - totalVariantQty} lagi</span>
-            }
+      {/* Jika item punya variant dan arah KELUAR → langsung pilih per desain, qty otomatis */}
+      {isOut && hasVariants ? (
+        <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:12, padding:"14px" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span>🎨 Pilih qty per desain</span>
+            {totalVariantQty > 0 && (
+              <span style={{ background:"#d1fae5", color:"#10b981", borderRadius:6, padding:"3px 10px", fontWeight:700, fontSize:12 }}>
+                Total: {totalVariantQty} pcs
+              </span>
+            )}
           </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:7, marginBottom:4 }}>
             {itemVariants.map(v => {
               const cnt = Number(variantCounts[v.id])||0;
               return (
-                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:9, border:`2px solid ${cnt>0?"#ee4181":"#e8edf8"}`, background:cnt>0?"#fde8f0":"#fff" }}>
+                <div key={v.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 11px", borderRadius:9, border:`2px solid ${cnt>0?"#ee4181":"#e8edf8"}`, background:cnt>0?"#fde8f0":"#fff" }}>
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:13, fontWeight:cnt>0?700:500, color:"#1a2a5e" }}>{v.name}</div>
                     <div style={{ fontSize:11, color:v.stock<=0?"#ef4444":"#7a8ab0" }}>{v.stock<=0?"❌ Habis":`Sisa ${v.stock} pcs`}</div>
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <button onClick={()=>decV(v.id)} disabled={!cnt} className="tap-btn"
-                      style={{ width:30, height:30, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#fde8f0", cursor:cnt?"pointer":"not-allowed", fontSize:16, color:"#ee4181", fontWeight:700, opacity:cnt?1:0.4 }}>−</button>
-                    <span style={{ fontSize:14, fontWeight:700, minWidth:22, textAlign:"center", color:cnt>0?"#ee4181":"#c8d2e0" }}>{cnt}</span>
-                    <button onClick={()=>incV(v.id, v.stock)} disabled={v.stock<=0 || cnt>=v.stock || totalVariantQty>=Number(form.qty)} className="tap-btn"
-                      style={{ width:30, height:30, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#e4f3fd", cursor:(v.stock>0&&cnt<v.stock&&totalVariantQty<Number(form.qty))?"pointer":"not-allowed", fontSize:16, color:"#2d4ba0", fontWeight:700, opacity:(v.stock>0&&cnt<v.stock&&totalVariantQty<Number(form.qty))?1:0.4 }}>+</button>
+                      style={{ width:32, height:32, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#fde8f0", cursor:cnt?"pointer":"not-allowed", fontSize:17, color:"#ee4181", fontWeight:700, opacity:cnt?1:0.4 }}>−</button>
+                    <span style={{ fontSize:15, fontWeight:700, minWidth:24, textAlign:"center", color:cnt>0?"#ee4181":"#c8d2e0" }}>{cnt}</span>
+                    <button onClick={()=>incV(v.id, v.stock)} disabled={v.stock<=0 || cnt>=v.stock} className="tap-btn"
+                      style={{ width:32, height:32, border:"1.5px solid #d4c8e0", borderRadius:7, background:"#e4f3fd", cursor:(v.stock>0&&cnt<v.stock)?"pointer":"not-allowed", fontSize:17, color:"#2d4ba0", fontWeight:700, opacity:(v.stock>0&&cnt<v.stock)?1:0.4 }}>+</button>
                   </div>
                 </div>
               );
             })}
           </div>
-          {totalVariantQty !== Number(form.qty) && (
-            <div style={{ fontSize:12, color:"#ef4444", fontWeight:600, marginTop:8 }}>
-              ⚠️ Total desain ({totalVariantQty}) harus sama dengan jumlah ({form.qty}) sebelum bisa disimpan
-            </div>
+          {totalVariantQty === 0 && (
+            <div style={{ fontSize:12, color:"#92400e", marginTop:4 }}>👆 Tap + untuk memilih qty per desain</div>
           )}
+        </div>
+      ) : (
+        <div>
+          <label style={{ fontSize:13, color:"#7a8ab0", display:"block", marginBottom:5, fontWeight:600 }}>Jumlah *</label>
+          <input type="number" min={1} placeholder="0" value={form.qty}
+            onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
+            style={{ width:"100%", padding:"11px 12px", border:"1.5px solid #d4c8e0", borderRadius:10, fontSize:15 }} />
         </div>
       )}
 
