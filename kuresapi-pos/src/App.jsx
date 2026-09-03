@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
-const SUPABASE_URL = "https://iqhvdvvuonqxlnbnefgb.supabase.co";
+const SUPABASE_URL = "https://iqhvdvvuonqxlnbnefgb.supabase.co";https://github.com/kintaniptr/kuresapi-pos/blob/main/kuresapi-pos/src/App.jsx
 const SUPABASE_KEY = "sb_publishable_nstXpLON-OZBhLpNAE5bdg_lMVSgGw9";
 
 // ─── KREDENSIAL LOGIN ─────────────────────────────────────────────────────────
